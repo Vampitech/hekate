@@ -146,7 +146,7 @@ lv_res_t launch_payload(lv_obj_t *list)
 
 	char path[128];
 
-	strcpy(path,"bootloader/payloads/");
+	strcpy(path,"NEXT/sys/payloads/");
 	strcat(path, filename);
 
 	if (sd_mount())
@@ -214,7 +214,7 @@ void load_saved_configuration()
 	LIST_INIT(ini_nyx_sections);
 
 	// Load hekate configuration.
-	if (ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
+	if (ini_parse(&ini_sections, "NEXT/sys/ofw.ini", false))
 	{
 		LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_sections, link)
 		{
@@ -253,7 +253,7 @@ void load_saved_configuration()
 	}
 
 	// Load Nyx configuration.
-	if (ini_parse(&ini_nyx_sections, "bootloader/nyx.ini", false))
+	if (ini_parse(&ini_nyx_sections, "NEXT/sys//nyx.ini", false))
 	{
 		LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_nyx_sections, link)
 		{
@@ -359,7 +359,7 @@ void nyx_init_load_res()
 	load_saved_configuration();
 
 	FIL fp;
-	f_open(&fp, "bootloader/sys/res.pak", FA_READ);
+	f_open(&fp, "NEXT/sys/res.pak", FA_READ);
 	f_read(&fp, (void *)NYX_RES_ADDR, f_size(&fp), NULL);
 	f_close(&fp);
 
