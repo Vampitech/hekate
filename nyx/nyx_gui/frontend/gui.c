@@ -1577,7 +1577,7 @@ static lv_res_t _create_window_home_launch(lv_obj_t *btn)
 		// Choose what to parse.
 		bool ini_parse_success = false;
 		if (!more_cfg)
-			ini_parse_success = ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false);
+			ini_parse_success = ini_parse(&ini_sections, "NEXT/sys/ofw.ini", false);
 		else
 			ini_parse_success = ini_parse(&ini_sections, "bootloader/ini", true);
 
