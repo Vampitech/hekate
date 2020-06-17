@@ -225,7 +225,7 @@ static void _create_autoboot_window()
 	sd_mount();
 
 	LIST_INIT(ini_sections);
-	if (ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
+	if (ini_parse(&ini_sections, "NEXT/sys/ofw.ini", false))
 	{
 		LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_sections, link)
 		{
