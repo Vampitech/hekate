@@ -814,7 +814,7 @@ static void _auto_launch_firmware()
 		if (f_stat("NEXT/sys/ofw.ini", NULL))
 			create_config_entry();
 
-		if (ini_parse(&ini_sections, "NEXT/sys/ofw.ini, false))
+		if (ini_parse(&ini_sections, "NEXT/sys/ofw.ini", false))
 		{
 			u32 configEntry = 0;
 			u32 boot_entry_id = 0;
