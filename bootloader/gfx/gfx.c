@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018 naehrwert
- * Copyright (C) 2018-2019 CTCaer
+ * Copyright (c) 2018-2020 CTCaer
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -18,6 +18,10 @@
 #include <stdarg.h>
 #include <string.h>
 #include "gfx.h"
+
+// Global gfx console and context.
+gfx_ctxt_t gfx_ctxt;
+gfx_con_t gfx_con;
 
 static const u8 _gfx_font[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Char 032 ( )
@@ -117,28 +121,28 @@ static const u8 _gfx_font[] = {
 	0x00, 0x00, 0x00, 0x4C, 0x32, 0x00, 0x00, 0x00  // Char 126 (~)
 };
 
+void gfx_clear_grey(u8 color)
+{
+	memset(gfx_ctxt.fb, color, gfx_ctxt.width * gfx_ctxt.height * 4);
+}
+
+void gfx_clear_partial_grey(u8 color, u32 pos_x, u32 height)
+{
+	memset(gfx_ctxt.fb + pos_x * gfx_ctxt.stride, color, height * 4 * gfx_ctxt.stride);
+}
+
+void gfx_clear_color(u32 color)
+{
+	for (u32 i = 0; i < gfx_ctxt.width * gfx_ctxt.height; i++)
+		gfx_ctxt.fb[i] = color;
+}
+
 void gfx_init_ctxt(u32 *fb, u32 width, u32 height, u32 stride)
 {
 	gfx_ctxt.fb = fb;
 	gfx_ctxt.width = width;
 	gfx_ctxt.height = height;
 	gfx_ctxt.stride = stride;
-}
-
-void gfx_clear_grey(u8 color)
-{
-	memset(gfx_ctxt.fb, color, 0x3C0000);
-}
-
-void gfx_clear_color(u32 color)
-{
-	for (u32 i = 0; i < gfx_ctxt.height * gfx_ctxt.stride; i++)
-		gfx_ctxt.fb[i] = color;
-}
-
-void gfx_clear_partial_grey(u8 color, u32 pos_x, u32 height)
-{
-	memset(gfx_ctxt.fb + pos_x * gfx_ctxt.stride, color, height * 4 * gfx_ctxt.stride);
 }
 
 void gfx_con_init()
@@ -185,9 +189,9 @@ void gfx_putc(char c)
 			u8 *cbuf = (u8 *)&_gfx_font[8 * (c - 32)];
 			u32 *fb = gfx_ctxt.fb + gfx_con.x + gfx_con.y * gfx_ctxt.stride;
 
-			for (u32 i = 0; i < 16; i+=2)
+			for (u32 i = 0; i < 16; i += 2)
 			{
-				u8 v = *cbuf++;
+				u8 v = *cbuf;
 				for (u32 k = 0; k < 2; k++)
 				{
 					for (u32 j = 0; j < 8; j++)
@@ -212,13 +216,14 @@ void gfx_putc(char c)
 					fb += gfx_ctxt.stride - 16;
 					v = *cbuf;
 				}
+				cbuf++;
 			}
 			gfx_con.x += 16;
 		}
 		else if (c == '\n')
 		{
 			gfx_con.x = 0;
-			gfx_con.y +=16;
+			gfx_con.y += 16;
 			if (gfx_con.y > gfx_ctxt.height - 16)
 				gfx_con.y = 0;
 		}
@@ -254,10 +259,9 @@ void gfx_putc(char c)
 		}
 		break;
 	}
-	
 }
 
-void gfx_puts(const char *s)
+void gfx_puts(char *s)
 {
 	if (!s || gfx_con.mute)
 		return;

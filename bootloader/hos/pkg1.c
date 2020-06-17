@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2018 naehrwert
  * Copyright (c) 2018 st4rk
- * Copyright (c) 2018-2019 CTCaer
+ * Copyright (c) 2018-2020 CTCaer
  * Copyright (c) 2018 balika011
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -20,9 +20,10 @@
 #include <string.h>
 
 #include "pkg1.h"
-#include "../gfx/gfx.h"
-#include "../sec/se.h"
-#include "../utils/aarch64_util.h"
+#include <gfx_utils.h>
+#include <mem/heap.h>
+#include <sec/se.h>
+#include <utils/aarch64_util.h>
 
 #define _NOPv7() 0xE320F000
 
@@ -31,72 +32,53 @@ PATCHSET_DEF(_secmon_1_patchset,
 	// Patch the relocator to be able to run from SM_100_ADR.
 	{ 0x1E0, _ADRP(0, 0x7C013000 - _PAGEOFF(SM_100_ADR)) },
 	//Patch package2 decryption and signature/hash checks.
-	{ 0x9F0 + 0xADC, _NOP() }, //Header signature.
-	{ 0x9F0 + 0xB8C, _NOP() }, //Version.
-	{ 0x9F0 + 0xBB0, _NOP() }  //Sections SHA2.
+	{ 0x9F0 + 0xADC, _NOP() } // Header signature.
 );
 
 PATCHSET_DEF(_secmon_2_patchset,
 	// Patch package2 decryption and signature/hash checks.
-	{ 0xAC8 + 0xAAC, _NOP() }, //Header signature.
-	{ 0xAC8 + 0xB3C, _NOP() }, //Version.
-	{ 0xAC8 + 0xB58, _NOP() }  //Sections SHA2.
+	{ 0xAC8 + 0xAAC, _NOP() } // Header signature.
 );
 
 PATCHSET_DEF(_secmon_3_patchset,
 	// Patch package2 decryption and signature/hash checks.
-	{ 0xAC8 + 0xA30, _NOP() }, //Header signature.
-	{ 0xAC8 + 0xAB4, _NOP() }, //package2 structure.
-	{ 0xAC8 + 0xAC0, _NOP() }, //Version.
-	{ 0xAC8 + 0xADC, _NOP() }  //Sections SHA2.
+	{ 0xAC8 + 0xA30, _NOP() } // Header signature.
 );
 
 PATCHSET_DEF(_secmon_4_patchset,
 	// Patch package2 decryption and signature/hash checks.
-	{ 0x2300 + 0x5D80, _NOP() }, //package2 structure.
-	{ 0x2300 + 0x5D8C, _NOP() }, //Version.
-	{ 0x2300 + 0x5EFC, _NOP() }, //Header signature.
-	{ 0xAC8 + 0xA2C,   _NOP() }  //Sections SHA2.
+	{ 0x2300 + 0x5EFC, _NOP() } // Header signature.
 );
 
 PATCHSET_DEF(_secmon_5_patchset,
 	// Patch package2 decryption and signature/hash checks.
-	{ 0xDA8 + 0x9D8, _NOP() }, //package2 structure.
-	{ 0xDA8 + 0x9E4, _NOP() }, //Version.
-	{ 0xDA8 + 0xC9C, _NOP() }, //Header signature.
-	{ 0xDA8 + 0x1038, _NOP() } //Sections SHA2.
+	{ 0xDA8 + 0xC9C, _NOP() } // Header signature.
 );
 
 PATCHSET_DEF(_secmon_6_patchset,
 	// Patch package2 decryption and signature/hash checks.
-	{ 0xDC8 + 0x820, _NOP() },  //package2 structure.
-	{ 0xDC8 + 0x82C, _NOP() },  //Version.
-	{ 0xDC8 + 0xE90, _NOP() },  //Header signature.
-	{ 0xDC8 + 0x112C, _NOP() }, //Sections SHA2.
+	{ 0xDC8 + 0xE90, _NOP() } // Header signature.
 	// Fix sleep mode for debug.
-	{ 0x1A68 + 0x3854, 0x94000E45 }, //gpio_config_for_uart.
-	{ 0x1A68 + 0x3858, 0x97FFFC0F }, //clkrst_reboot_uarta.
-	{ 0x1A68 + 0x385C, 0x52A00021 }, //MOV W1, #0x10000 ; baudrate.
-	{ 0x1A68 + 0x3860, 0x2A1F03E0 }, //MOV W0, WZR ; uart_port -> A.
-	{ 0x1A68 + 0x3864, 0x72984001 }, //MOVK W1, #0xC200 ; baudrate.
-	{ 0x1A68 + 0x3868, 0x94000C8C }, //uart_configure.
-	{ 0x1A68 + 0x3A6C, _NOP() }      // warmboot UARTA cfg.
+	// { 0x1A68 + 0x3854, 0x94000E45 }, //gpio_config_for_uart.
+	// { 0x1A68 + 0x3858, 0x97FFFC0F }, //clkrst_reboot_uarta.
+	// { 0x1A68 + 0x385C, 0x52A00021 }, //MOV W1, #0x10000 ; baudrate.
+	// { 0x1A68 + 0x3860, 0x2A1F03E0 }, //MOV W0, WZR ; uart_port -> A.
+	// { 0x1A68 + 0x3864, 0x72984001 }, //MOVK W1, #0xC200 ; baudrate.
+	// { 0x1A68 + 0x3868, 0x94000C8C }, //uart_configure.
+	// { 0x1A68 + 0x3A6C, _NOP() }      // warmboot UARTA cfg.
 );
 
 PATCHSET_DEF(_secmon_620_patchset,
 	// Patch package2 decryption and signature/hash checks.
-	{ 0xDC8 + 0x604, _NOP() }, //package2 structure.
-	{ 0xDC8 + 0x610, _NOP() }, //Version.
-	{ 0xDC8 + 0xC74, _NOP() }, //Header signature.
-	{ 0xDC8 + 0xF10, _NOP() }, //Sections SHA2.
+	{ 0xDC8 + 0xC74, _NOP() } // Header signature.
 	// Fix sleep mode for debug.
-	{ 0x2AC8 + 0x3854, 0x94000F42 }, //gpio_config_for_uart.
-	{ 0x2AC8 + 0x3858, 0x97FFFC0F }, //clkrst_reboot_uarta.
-	{ 0x2AC8 + 0x385C, 0x52A00021 }, //MOV W1, #0x10000 ; baudrate.
-	{ 0x2AC8 + 0x3860, 0x2A1F03E0 }, //MOV W0, WZR ; uart_port -> A.
-	{ 0x2AC8 + 0x3864, 0x72984001 }, //MOVK W1, #0xC200 ; baudrate.
-	{ 0x2AC8 + 0x3868, 0x94000D89 }, //uart_configure.
-	{ 0x2AC8 + 0x3A6C, _NOP() }      // warmboot UARTA cfg.
+	// { 0x2AC8 + 0x3854, 0x94000F42 }, //gpio_config_for_uart.
+	// { 0x2AC8 + 0x3858, 0x97FFFC0F }, //clkrst_reboot_uarta.
+	// { 0x2AC8 + 0x385C, 0x52A00021 }, //MOV W1, #0x10000 ; baudrate.
+	// { 0x2AC8 + 0x3860, 0x2A1F03E0 }, //MOV W0, WZR ; uart_port -> A.
+	// { 0x2AC8 + 0x3864, 0x72984001 }, //MOVK W1, #0xC200 ; baudrate.
+	// { 0x2AC8 + 0x3868, 0x94000D89 }, //uart_configure.
+	// { 0x2AC8 + 0x3A6C, _NOP() }      // warmboot UARTA cfg.
 );
 
 PATCHSET_DEF(_warmboot_1_patchset,
@@ -133,20 +115,28 @@ PATCHSET_DEF(_warmboot_4_patchset,
  */
 
 static const pkg1_id_t _pkg1_ids[] = {
-	{ "20161121183008", 0, 0x1900, 0x3FE0, { 2, 1, 0 }, SM_100_ADR, 0x8000D000, true,  _secmon_1_patchset, _warmboot_1_patchset },   //1.0.0 (Patched relocator)
-	{ "20170210155124", 0, 0x1900, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, true,  _secmon_2_patchset, _warmboot_2_patchset },   //2.0.0 - 2.3.0
-	{ "20170519101410", 1, 0x1A00, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, true,  _secmon_3_patchset, _warmboot_3_patchset },   //3.0.0
-	{ "20170710161758", 2, 0x1A00, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, true,  _secmon_3_patchset, _warmboot_3_patchset },   //3.0.1 - 3.0.2
-	{ "20170921172629", 3, 0x1800, 0x3FE0, { 1, 2, 0 }, 0x4002B000, 0x4003B000, false, _secmon_4_patchset, _warmboot_4_patchset },   //4.0.0 - 4.1.0
-	{ "20180220163747", 4, 0x1900, 0x3FE0, { 1, 2, 0 }, 0x4002B000, 0x4003B000, false, _secmon_5_patchset, _warmboot_4_patchset },   //5.0.0 - 5.1.0
-	{ "20180802162753", 5, 0x1900, 0x3FE0, { 1, 2, 0 }, 0x4002B000, 0x4003D800, false, _secmon_6_patchset, _warmboot_4_patchset },   //6.0.0 - 6.1.0
-	{ "20181107105733", 6, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x4002B000, 0x4003D800, false, _secmon_620_patchset, _warmboot_4_patchset }, //6.2.0
-	{ "20181218175730", 7, 0x0F00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //7.0.0
-	{ "20190208150037", 7, 0x0F00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //7.0.1
-	{ "20190314172056", 7, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //8.0.0 - 8.0.1
-	{ "20190531152432", 8, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //8.1.0
+	{ "20161121183008",  0, 0x1900, 0x3FE0, { 2, 1, 0 }, SM_100_ADR, 0x8000D000, true,  _secmon_1_patchset, _warmboot_1_patchset },   //1.0.0 (Patched relocator)
+	{ "20170210155124",  0, 0x1900, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, true,  _secmon_2_patchset, _warmboot_2_patchset },   //2.0.0 - 2.3.0
+	{ "20170519101410",  1, 0x1A00, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, true,  _secmon_3_patchset, _warmboot_3_patchset },   //3.0.0
+	{ "20170710161758",  2, 0x1A00, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, true,  _secmon_3_patchset, _warmboot_3_patchset },   //3.0.1 - 3.0.2
+	{ "20170921172629",  3, 0x1800, 0x3FE0, { 1, 2, 0 }, 0x4002B000, 0x4003B000, false, _secmon_4_patchset, _warmboot_4_patchset },   //4.0.0 - 4.1.0
+	{ "20180220163747",  4, 0x1900, 0x3FE0, { 1, 2, 0 }, 0x4002B000, 0x4003B000, false, _secmon_5_patchset, _warmboot_4_patchset },   //5.0.0 - 5.1.0
+	{ "20180802162753",  5, 0x1900, 0x3FE0, { 1, 2, 0 }, 0x4002B000, 0x4003D800, false, _secmon_6_patchset, _warmboot_4_patchset },   //6.0.0 - 6.1.0
+	{ "20181107105733",  6, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x4002B000, 0x4003D800, false, _secmon_620_patchset, _warmboot_4_patchset }, //6.2.0
+	{ "20181218175730",  7, 0x0F00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //7.0.0
+	{ "20190208150037",  7, 0x0F00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //7.0.1
+	{ "20190314172056",  7, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //8.0.0 - 8.0.1
+	{ "20190531152432",  8, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //8.1.0
+	{ "20190809135709",  9, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //9.0.0 - 9.0.1
+	{ "20191021113848", 10, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //9.1.0
+	{ "20200303104606", 10, 0x0E00, 0x6FE0, { 1, 2, 0 }, 0x40030000, 0x4003E000, false, NULL, NULL }, //10.0.0
 	{ NULL } //End.
 };
+
+const pkg1_id_t *pkg1_get_latest()
+{
+	return &_pkg1_ids[sizeof(_pkg1_ids) / sizeof(pkg1_id_t) - 2];
+}
 
 const pkg1_id_t *pkg1_identify(u8 *pkg1)
 {

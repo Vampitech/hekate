@@ -20,33 +20,25 @@
 #include <stdlib.h>
 
 #include "fe_emmc_tools.h"
-#include "../config/config.h"
-#include "../gfx/gfx.h"
+#include <memory_map.h>
+#include "../config.h"
+#include <gfx_utils.h>
 #include "../gfx/tui.h"
-#include "../libs/fatfs/ff.h"
-#include "../mem/heap.h"
-#include "../sec/se.h"
+#include <libs/fatfs/ff.h>
+#include <mem/heap.h>
+#include <sec/se.h>
 #include "../storage/nx_emmc.h"
-#include "../storage/sdmmc.h"
-#include "../utils/btn.h"
-#include "../utils/util.h"
-
-#define EMMC_BUF_ALIGNED 0xB5000000
-#define SDXC_BUF_ALIGNED 0xB6000000
-#define MIXD_BUF_ALIGNED 0xB7000000
+#include <storage/nx_sd.h>
+#include <storage/sdmmc.h>
+#include <utils/btn.h>
+#include <utils/util.h>
 
 #define NUM_SECTORS_PER_ITER 8192 // 4MB Cache.
 #define OUT_FILENAME_SZ 128
-#define HASH_FILENAME_SZ (OUT_FILENAME_SZ + 11) // 11 == strlen(".sha256sums")
 #define SHA256_SZ 0x20
 
-extern sdmmc_t sd_sdmmc;
-extern sdmmc_storage_t sd_storage;
-extern FATFS sd_fs;
 extern hekate_config h_cfg;
 
-extern bool sd_mount();
-extern void sd_unmount();
 extern void emmcsn_path_impl(char *path, char *sub_dir, char *filename, sdmmc_storage_t *storage);
 
 #pragma GCC push_options
@@ -55,44 +47,16 @@ extern void emmcsn_path_impl(char *path, char *sub_dir, char *filename, sdmmc_st
 static int _dump_emmc_verify(sdmmc_storage_t *storage, u32 lba_curr, char *outFilename, emmc_part_t *part)
 {
 	FIL fp;
-	FIL hashFp;
 	u8 sparseShouldVerify = 4;
-	u32 btn = 0;
 	u32 prevPct = 200;
 	u32 sdFileSector = 0;
 	int res = 0;
-	const char hexa[] = "0123456789abcdef";
 
 	u8 hashEm[SHA256_SZ];
 	u8 hashSd[SHA256_SZ];
 
 	if (f_open(&fp, outFilename, FA_READ) == FR_OK)
 	{
-		if (h_cfg.verification == 3)
-		{
-			char hashFilename[HASH_FILENAME_SZ];
-			strncpy(hashFilename, outFilename, OUT_FILENAME_SZ - 1);
-			strcat(hashFilename, ".sha256sums");
-
-			res = f_open(&hashFp, hashFilename, FA_CREATE_ALWAYS | FA_WRITE);
-			if (res)
-			{
-				f_close(&fp);
-
-				gfx_con.fntsz = 16;
-				EPRINTFARGS("\nHash file could not be opened for write (error %d).\n\nAborting..\n", res);
-				return 1;
-			}
-
-			char chunkSizeAscii[10];
-			itoa(NUM_SECTORS_PER_ITER * NX_EMMC_BLOCKSIZE, chunkSizeAscii, 10);
-			chunkSizeAscii[9] = '\0';
-
-			f_puts("# chunksize: ", &hashFp);
-			f_puts(chunkSizeAscii, &hashFp);
-			f_puts("\n", &hashFp);
-		}
-
 		u32 totalSectorsVer = (u32)((u64)f_size(&fp) >> (u64)9);
 
 		u8 *bufEm = (u8 *)EMMC_BUF_ALIGNED;
@@ -105,21 +69,19 @@ static int _dump_emmc_verify(sdmmc_storage_t *storage, u32 lba_curr, char *outFi
 		while (totalSectorsVer > 0)
 		{
 			num = MIN(totalSectorsVer, NUM_SECTORS_PER_ITER);
-			
+
 			// Check every time or every 4.
 			// Every 4 protects from fake sd, sector corruption and frequent I/O corruption.
 			// Full provides all that, plus protection from extremely rare I/O corruption.
-			if ((h_cfg.verification >= 2) || !(sparseShouldVerify % 4))
+			if (!(sparseShouldVerify % 4))
 			{
 				if (!sdmmc_storage_read(storage, lba_curr, num, bufEm))
 				{
 					gfx_con.fntsz = 16;
 					EPRINTFARGS("\nFailed to read %d blocks (@LBA %08X),\nfrom eMMC!\n\nVerification failed..\n",
 						num, lba_curr);
-	
+
 					f_close(&fp);
-					if (h_cfg.verification == 3)
-						f_close(&hashFp);
 					return 1;
 				}
 				f_lseek(&fp, (u64)sdFileSector << (u64)9);
@@ -127,44 +89,22 @@ static int _dump_emmc_verify(sdmmc_storage_t *storage, u32 lba_curr, char *outFi
 				{
 					gfx_con.fntsz = 16;
 					EPRINTFARGS("\nFailed to read %d blocks (@LBA %08X),\nfrom sd card!\n\nVerification failed..\n", num, lba_curr);
-	
-					f_close(&fp);
-					if (h_cfg.verification == 3)
-						f_close(&hashFp);
 
+					f_close(&fp);
 					return 1;
 				}
 
-				se_calc_sha256(hashEm, bufEm, num << 9);
-				se_calc_sha256(hashSd, bufSd, num << 9);
+				se_calc_sha256_oneshot(hashEm, bufEm, num << 9);
+				se_calc_sha256_oneshot(hashSd, bufSd, num << 9);
 				res = memcmp(hashEm, hashSd, 0x10);
 
 				if (res)
 				{
 					gfx_con.fntsz = 16;
 					EPRINTFARGS("\nSD and eMMC data (@LBA %08X),\ndo not match!\n\nVerification failed..\n", lba_curr);
-	
+
 					f_close(&fp);
-					if (h_cfg.verification == 3)
-						f_close(&hashFp);
-
 					return 1;
-				}
-
-				if (h_cfg.verification == 3)
-				{
-					// Transform computed hash to readable hexadecimal
-					char hashStr[SHA256_SZ * 2 + 1];
-					char *hashStrPtr = hashStr;
-					for (int i = 0; i < SHA256_SZ; i++)
-					{
-						*(hashStrPtr++) = hexa[hashSd[i] >> 4];
-						*(hashStrPtr++) = hexa[hashSd[i] & 0x0F];
-					}
-					hashStr[SHA256_SZ * 2] = '\0';
-
-					f_puts(hashStr, &hashFp);
-					f_puts("\n", &hashFp);
 				}
 			}
 
@@ -180,8 +120,7 @@ static int _dump_emmc_verify(sdmmc_storage_t *storage, u32 lba_curr, char *outFi
 			sdFileSector += num;
 			sparseShouldVerify++;
 
-			btn = btn_wait_timeout(0, BTN_VOL_DOWN | BTN_VOL_UP);
-			if ((btn & BTN_VOL_DOWN) && (btn & BTN_VOL_UP))
+			if (btn_read_vol() == (BTN_VOL_UP | BTN_VOL_DOWN))
 			{
 				gfx_con.fntsz = 16;
 				WPRINTF("\n\nVerification was cancelled!");
@@ -189,13 +128,11 @@ static int _dump_emmc_verify(sdmmc_storage_t *storage, u32 lba_curr, char *outFi
 				msleep(1000);
 
 				f_close(&fp);
-				f_close(&hashFp);
 
 				return 0;
 			}
 		}
 		f_close(&fp);
-		f_close(&hashFp);
 
 		tui_pbar(0, gfx_con.y, pct, 0xFFCCCCCC, 0xFF555555);
 
@@ -230,7 +167,6 @@ static int _dump_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part_t 
 	u32 currPartIdx = 0;
 	u32 numSplitParts = 0;
 	u32 maxSplitParts = 0;
-	u32 btn = 0;
 	bool isSmallSdCard = false;
 	bool partialDumpInProgress = false;
 	int res = 0;
@@ -239,7 +175,7 @@ static int _dump_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part_t 
 
 	FIL partialIdxFp;
 	char partialIdxFilename[12];
-	memcpy(partialIdxFilename, "partial.idx", 12);
+	strcpy(partialIdxFilename, "partial.idx");
 
 	gfx_con.fntsz = 8;
 	gfx_printf("\nSD Card free space: %d MiB, Total backup size %d MiB\n\n",
@@ -257,7 +193,7 @@ static int _dump_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part_t 
 	{
 		isSmallSdCard = true;
 
-		gfx_printf("%k\nSD card free space is smaller than total backup size.%k\n", 0xFFFFBA00, 0xFFCCCCCC);
+		gfx_printf("%k\nSD card free space is smaller than backup size.%k\n", 0xFFFFBA00, 0xFFCCCCCC);
 
 		if (!maxSplitParts)
 		{
@@ -364,15 +300,12 @@ static int _dump_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part_t 
 			memset(&fp, 0, sizeof(fp));
 			currPartIdx++;
 
-			if (h_cfg.verification)
+			// Verify part.
+			if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
 			{
-				// Verify part.
-				if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
-				{
-					EPRINTF("\nPress any key and try again...\n");
+				EPRINTF("\nPress any key and try again...\n");
 
-					return 0;
-				}
+				return 0;
 			}
 
 			_update_filename(outFilename, sdPathLen, numSplitParts, currPartIdx);
@@ -479,8 +412,8 @@ static int _dump_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part_t 
 			bytesWritten = 0;
 		}
 
-		btn = btn_wait_timeout(0, BTN_VOL_DOWN | BTN_VOL_UP);
-		if ((btn & BTN_VOL_DOWN) && (btn & BTN_VOL_UP))
+		// Check for cancellation combo.
+		if (btn_read_vol() == (BTN_VOL_UP | BTN_VOL_DOWN))
 		{
 			gfx_con.fntsz = 16;
 			WPRINTF("\n\nThe backup was cancelled!");
@@ -498,18 +431,15 @@ static int _dump_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part_t 
 	// Backup operation ended successfully.
 	f_close(&fp);
 
-	if (h_cfg.verification)
+	// Verify last part or single file backup.
+	if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
 	{
-		// Verify last part or single file backup.
-		if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
-		{
-			EPRINTF("\nPress any key and try again...\n");
+		EPRINTF("\nPress any key and try again...\n");
 
-			return 0;
-		}
-		else
-			tui_pbar(0, gfx_con.y, 100, 0xFF96FF00, 0xFF155500);
+		return 0;
 	}
+	else
+		tui_pbar(0, gfx_con.y, 100, 0xFF96FF00, 0xFF155500);
 
 	gfx_con.fntsz = 16;
 	// Remove partial backup index file if no fatal errors occurred.
@@ -549,7 +479,7 @@ static void _dump_emmc_selected(emmcPartType_t dumpType)
 
 	sdmmc_storage_t storage;
 	sdmmc_t sdmmc;
-	if (!sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_4, SDMMC_BUS_WIDTH_8, 4))
+	if (!sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400))
 	{
 		EPRINTF("Failed to init eMMC.");
 		goto out;
@@ -572,7 +502,7 @@ static void _dump_emmc_selected(emmcPartType_t dumpType)
 		bootPart.lba_end = (BOOT_PART_SIZE / NX_EMMC_BLOCKSIZE) - 1;
 		for (i = 0; i < 2; i++)
 		{
-			memcpy(bootPart.name, "BOOT", 5);
+			strcpy(bootPart.name, "BOOT");
 			bootPart.name[4] = (u8)('0' + i);
 			bootPart.name[5] = 0;
 
@@ -588,7 +518,7 @@ static void _dump_emmc_selected(emmcPartType_t dumpType)
 
 	if ((dumpType & PART_SYSTEM) || (dumpType & PART_USER) || (dumpType & PART_RAW))
 	{
-		sdmmc_storage_set_mmc_partition(&storage, 0);
+		sdmmc_storage_set_mmc_partition(&storage, EMMC_GPP);
 
 		if ((dumpType & PART_SYSTEM) || (dumpType & PART_USER))
 		{
@@ -637,13 +567,11 @@ static void _dump_emmc_selected(emmcPartType_t dumpType)
 	timer = get_tmr_s() - timer;
 	gfx_printf("Time taken: %dm %ds.\n", timer / 60, timer % 60);
 	sdmmc_storage_end(&storage);
-	if (res && h_cfg.verification)
+	if (res)
 		gfx_printf("\n%kFinished and verified!%k\nPress any key...\n", 0xFF96FF00, 0xFFCCCCCC);
-	else if (res)
-		gfx_printf("\nFinished! Press any key...\n");
 
 out:
-	sd_unmount();
+	sd_end();
 	btn_wait();
 }
 
@@ -770,15 +698,12 @@ static int _restore_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part
 			memset(&fp, 0, sizeof(fp));
 			currPartIdx++;
 
-			if (h_cfg.verification)
+			// Verify part.
+			if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
 			{
-				// Verify part.
-				if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
-				{
-					EPRINTF("\nPress any key and try again...\n");
+				EPRINTF("\nPress any key and try again...\n");
 
-					return 0;
-				}
+				return 0;
 			}
 
 			_update_filename(outFilename, sdPathLen, numSplitParts, currPartIdx);
@@ -848,18 +773,15 @@ static int _restore_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part
 	// Restore operation ended successfully.
 	f_close(&fp);
 
-	if (h_cfg.verification)
+	// Verify restored data.
+	if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
 	{
-		// Verify restored data.
-		if (_dump_emmc_verify(storage, lbaStartPart, outFilename, part))
-		{
-			EPRINTF("\nPress any key and try again...\n");
+		EPRINTF("\nPress any key and try again...\n");
 
-			return 0;
-		}
-		else
-			tui_pbar(0, gfx_con.y, 100, 0xFF96FF00, 0xFF155500);
+		return 0;
 	}
+	else
+		tui_pbar(0, gfx_con.y, 100, 0xFF96FF00, 0xFF155500);
 
 	gfx_con.fntsz = 16;
 	gfx_puts("\n\n");
@@ -908,7 +830,7 @@ static void _restore_emmc_selected(emmcPartType_t restoreType)
 
 	sdmmc_storage_t storage;
 	sdmmc_t sdmmc;
-	if (!sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_4, SDMMC_BUS_WIDTH_8, 4))
+	if (!sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400))
 	{
 		EPRINTF("Failed to init eMMC.");
 		goto out;
@@ -928,7 +850,7 @@ static void _restore_emmc_selected(emmcPartType_t restoreType)
 		bootPart.lba_end = (BOOT_PART_SIZE / NX_EMMC_BLOCKSIZE) - 1;
 		for (i = 0; i < 2; i++)
 		{
-			memcpy(bootPart.name, "BOOT", 4);
+			strcpy(bootPart.name, "BOOT");
 			bootPart.name[4] = (u8)('0' + i);
 			bootPart.name[5] = 0;
 
@@ -944,7 +866,7 @@ static void _restore_emmc_selected(emmcPartType_t restoreType)
 
 	if (restoreType & PART_GP_ALL)
 	{
-		sdmmc_storage_set_mmc_partition(&storage, 0);
+		sdmmc_storage_set_mmc_partition(&storage, EMMC_GPP);
 
 		LIST_INIT(gpt);
 		nx_emmc_gpt_parse(&gpt, &storage);
@@ -982,13 +904,11 @@ static void _restore_emmc_selected(emmcPartType_t restoreType)
 	timer = get_tmr_s() - timer;
 	gfx_printf("Time taken: %dm %ds.\n", timer / 60, timer % 60);
 	sdmmc_storage_end(&storage);
-	if (res && h_cfg.verification)
+	if (res)
 		gfx_printf("\n%kFinished and verified!%k\nPress any key...\n", 0xFF96FF00, 0xFFCCCCCC);
-	else if (res)
-		gfx_printf("\nFinished! Press any key...\n");
 
 out:
-	sd_unmount();
+	sd_end();
 	btn_wait();
 }
 

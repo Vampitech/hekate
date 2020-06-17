@@ -1,8 +1,8 @@
 /*
  * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
  * Copyright 2014 Google Inc.
- * Copyright (C) 2018 naehrwert
- * Copyright (C) 2018 CTCaer
+ * Copyright (c) 2018 naehrwert
+ * Copyright (c) 2018 CTCaer
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -17,7 +17,7 @@
 #include "t210.h"
 #include "pmc_lp0_t210.h"
 #include "sdram_lp0_param_t210.h"
-#include "../../common/common_module.h"
+#include <module.h>
 
 /*
  * This function reads SDRAM parameters from the common BCT format and
