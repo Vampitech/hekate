@@ -363,7 +363,7 @@ void nyx_init_load_res()
 	{
 		f_read(&fp, (void *)NYX_RES_ADDR, f_size(&fp), NULL);
 		f_close(&fp);
-}
+	}
 
 	// If no custom switch icon exists, load normal.
 	if (f_stat("bootloader/res/icon_switch_custom.bmp", NULL))
