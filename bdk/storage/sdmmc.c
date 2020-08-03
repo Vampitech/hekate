@@ -1030,6 +1030,8 @@ static void _sd_storage_parse_ssr(sdmmc_storage_t *storage)
 	raw_ssr2[0] = *(u32 *)&storage->raw_ssr[16];
 
 	storage->ssr.bus_width = (unstuff_bits(raw_ssr1, 510 - 384, 2) & SD_BUS_WIDTH_4) ? 4 : 1;
+	storage->ssr.protected_size = unstuff_bits(raw_ssr1, 448 - 384, 32);
+
 	switch(unstuff_bits(raw_ssr1, 440 - 384, 8))
 	{
 	case 0:
@@ -1328,13 +1330,13 @@ int sdmmc_storage_init_gc(sdmmc_storage_t *storage, sdmmc_t *sdmmc)
 	memset(storage, 0, sizeof(sdmmc_storage_t));
 	storage->sdmmc = sdmmc;
 
-	if (!sdmmc_init(sdmmc, SDMMC_2, SDMMC_POWER_1_8, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_DDR52, SDMMC_AUTO_CAL_DISABLE))
+	if (!sdmmc_init(sdmmc, SDMMC_2, SDMMC_POWER_1_8, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS102, SDMMC_AUTO_CAL_DISABLE))
 		return 0;
 DPRINTF("[gc] after init\n");
 
 	usleep(1000 + (10000 + sdmmc->divisor - 1) / sdmmc->divisor);
 
-	if (!sdmmc_tuning_execute(storage->sdmmc, SDHCI_TIMING_MMC_DDR52, MMC_SEND_TUNING_BLOCK_HS200))
+	if (!sdmmc_tuning_execute(storage->sdmmc, SDHCI_TIMING_MMC_HS102, MMC_SEND_TUNING_BLOCK_HS200))
 		return 0;
 DPRINTF("[gc] after tuning\n");
 

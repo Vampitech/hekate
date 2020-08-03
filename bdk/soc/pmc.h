@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018 naehrwert
  * Copyright (c) 2018 st4rk
+ * Copyright (c) 2018-2020 CTCaer
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -17,6 +18,8 @@
 
 #ifndef _PMC_H_
 #define _PMC_H_
+
+#include <utils/types.h>
 
 /*! PMC registers. */
 #define APBDEV_PMC_CNTRL 0x0
@@ -46,6 +49,8 @@
 #define  PMC_CRYPTO_OP_SE_ENABLE  0
 #define  PMC_CRYPTO_OP_SE_DISABLE 1
 #define APBDEV_PMC_SCRATCH33 0x120
+#define APBDEV_PMC_SCRATCH37 0x130
+#define  PMC_SCRATCH37_KERNEL_PANIC_FLAG (1 << 24)
 #define APBDEV_PMC_SCRATCH40 0x13C
 #define APBDEV_PMC_OSC_EDPD_OVER 0x1A4
 #define  PMC_OSC_EDPD_OVER_OSC_CTRL_OVER 0x400000
@@ -83,5 +88,7 @@
 #define APBDEV_PMC_SCRATCH188 0x810
 #define APBDEV_PMC_SCRATCH190 0x818
 #define APBDEV_PMC_SCRATCH200 0x840
+
+int pmc_enable_partition(u32 part, int enable);
 
 #endif

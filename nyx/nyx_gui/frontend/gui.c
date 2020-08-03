@@ -200,6 +200,11 @@ static void _save_log_to_bmp(char *fname)
 
 static void _save_fb_to_bmp()
 {
+	// Disallow screenshots if less than 2s passed.
+	static u32 timer = 0;
+	if (get_tmr_ms() < timer)
+		return;
+
 	if (do_reload)
 		return;
 
@@ -298,6 +303,9 @@ static void _save_fb_to_bmp()
 	lv_mbox_set_text(mbox, SYMBOL_CAMERA"  #96FF00 Screenshot saved!#");
 	manual_system_maintenance(true);
 	lv_mbox_start_auto_close(mbox, 4000);
+
+	// Set timer to 2s.
+	timer = get_tmr_ms() + 2000;
 }
 
 static void _disp_fb_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const lv_color_t *color_p)
@@ -329,16 +337,9 @@ static bool _fts_touch_read(lv_indev_data_t *data)
 	// Take a screenshot if 3 fingers.
 	if (touchpad.fingers > 2)
 	{
-		// Disallow screenshots if less than 2s passed.
-		static u32 timer = 0;
-		if (get_tmr_ms() > timer)
-		{
-			_save_fb_to_bmp();
-			timer = get_tmr_ms() + 2000;
-		}
+		_save_fb_to_bmp();
 
 		data->state = LV_INDEV_STATE_REL;
-
 		return false;
 	}
 
@@ -385,6 +386,8 @@ static bool _fts_touch_read(lv_indev_data_t *data)
 
 static bool _jc_virt_mouse_read(lv_indev_data_t *data)
 {
+	static u32 calib_timer = 0;
+
 	// Poll Joy-Con.
 	jc_gamepad_rpt_t *jc_pad = joycon_poll();
 
@@ -398,12 +401,20 @@ static bool _jc_virt_mouse_read(lv_indev_data_t *data)
 	if (jc_pad->cap)
 	{
 		_save_fb_to_bmp();
-		msleep(1000);
+
+		data->state = LV_INDEV_STATE_REL;
+		return false;
 	}
 
 	// Calibrate left stick.
 	if (!jc_drv_ctx.centering_done)
 	{
+		if (!calib_timer)
+			calib_timer = get_tmr_ms() + LV_INDEV_READ_PERIOD * 4;
+
+		if (calib_timer > get_tmr_ms())
+			return false;
+
 		if (jc_pad->conn_l
 			&& jc_pad->lstick_x > 0x400 && jc_pad->lstick_y > 0x400
 			&& jc_pad->lstick_x < 0xC00 && jc_pad->lstick_y < 0xC00)
@@ -424,7 +435,10 @@ static bool _jc_virt_mouse_read(lv_indev_data_t *data)
 
 	// Re-calibrate on disconnection.
 	if (!jc_pad->conn_l)
+	{
+		calib_timer = 0;
 		jc_drv_ctx.centering_done = 0;
+	}
 
 	// Set button presses.
 	if (jc_pad->a || jc_pad->zl || jc_pad->zr)
@@ -848,7 +862,7 @@ static void _launch_hos(u8 autoboot, u8 autoboot_list)
 
 	sd_end();
 
-	reconfig_hw_workaround(false, 0);
+	hw_reinit_workaround(false, 0);
 
 	// Mitigate L4T Joy-Con driver issue.
 	if ((autoboot & 0x80) && h_cfg.bootwait < 2)
@@ -868,7 +882,7 @@ void reload_nyx()
 
 	sd_end();
 
-	reconfig_hw_workaround(false, 0);
+	hw_reinit_workaround(false, 0);
 
 	// Some cards (Sandisk U1), do not like a fast power cycle. Wait min 100ms.
 	sdmmc_storage_init_wait_sd();
@@ -1231,18 +1245,18 @@ static void _update_status_bar(void *params)
 
 	u8 batt_level = (batt_percent >> 8) & 0xFF;
 	if (batt_level > 80)
-		s_printf(label + strlen(label), SYMBOL_BATTERY_FULL);
+		strcat(label, SYMBOL_BATTERY_FULL);
 	else if (batt_level > 60)
-		s_printf(label + strlen(label), SYMBOL_BATTERY_3);
+		strcat(label, SYMBOL_BATTERY_3);
 	else if (batt_level > 40)
-		s_printf(label + strlen(label), SYMBOL_BATTERY_2);
+		strcat(label, SYMBOL_BATTERY_2);
 	else if (batt_level > 15)
-		s_printf(label + strlen(label), SYMBOL_BATTERY_1);
+		strcat(label, SYMBOL_BATTERY_1);
 	else
-		s_printf(label + strlen(label), "#FF3C28 "SYMBOL_BATTERY_EMPTY"#");
+		strcat(label, "#FF3C28 "SYMBOL_BATTERY_EMPTY"#");
 
 	if (charge_status)
-		s_printf(label + strlen(label), " #FFDD00 "SYMBOL_CHARGE"#");
+		strcat(label, " #FFDD00 "SYMBOL_CHARGE"#");
 
 	lv_label_set_text(status_bar.battery, label);
 	lv_obj_realign(status_bar.battery);

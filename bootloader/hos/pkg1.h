@@ -19,6 +19,10 @@
 
 #include <utils/types.h>
 
+#define PK11_SECTION_WB 0
+#define PK11_SECTION_LD 1
+#define PK11_SECTION_SM 2
+
 typedef struct _patch_t
 {
 	u32 off;
@@ -37,10 +41,8 @@ typedef struct _pkg1_id_t
 	u32 kb;
 	u32 tsec_off;
 	u32 pkg11_off;
-	u32 sec_map[3];
 	u32 secmon_base;
 	u32 warmboot_base;
-	bool set_warmboot;
 	patch_t *secmon_patchset;
 	patch_t *warmboot_patchset;
 } pkg1_id_t;
@@ -60,6 +62,6 @@ typedef struct _pk11_hdr_t
 const pkg1_id_t *pkg1_get_latest();
 const pkg1_id_t *pkg1_identify(u8 *pkg1);
 void pkg1_decrypt(const pkg1_id_t *id, u8 *pkg1);
-void pkg1_unpack(void *warmboot_dst, void *secmon_dst, void *ldr_dst, const pkg1_id_t *id, u8 *pkg1);
+const u8 *pkg1_unpack(void *wm_dst, void *sm_dst, void *ldr_dst, const pkg1_id_t *id, u8 *pkg1);
 
 #endif

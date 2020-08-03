@@ -81,6 +81,32 @@ static lv_res_t _create_window_dump_done(int error, char *dump_filenames)
 	return LV_RES_OK;
 }
 
+static lv_res_t _cal0_dump_window_action(lv_obj_t *btns, const char * txt)
+{
+	int btn_idx = lv_btnm_get_pressed(btns);
+
+	mbox_action(btns, txt);
+
+	if (btn_idx == 1)
+	{
+		int error = !sd_mount();
+
+		if (!error)
+		{
+			char path[64];
+			emmcsn_path_impl(path, "/dumps", "cal0.bin", NULL);
+			error = sd_save_to_file((u8 *)cal0_buf, 0x8000, path);
+
+			sd_unmount();
+		}
+
+		_create_window_dump_done(error, "cal0.bin");
+	}
+
+	return LV_RES_INV;
+}
+
+
 static lv_res_t _battery_dump_window_action(lv_obj_t * btn)
 {
 	int error = !sd_mount();
@@ -230,7 +256,7 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 	lv_obj_set_style(dark_bg, &mbox_darken);
 	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
-	static const char * mbox_btn_map[] = { "\211", "\222OK", "\211", "" };
+	static const char * mbox_btn_map[] = { "\211", "\222Dump", "\222Close", "\211", "" };
 	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 5);
@@ -246,6 +272,7 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 	lv_obj_set_width(lb_desc, LV_HOR_RES / 9 * 3);
 
 	// Read package1.
+	u8 kb = 0;
 	char *build_date = malloc(32);
 	u8 *pkg1 = (u8 *)malloc(0x40000);
 	sdmmc_storage_init_mmc(&emmc_storage, &emmc_sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400);
@@ -261,11 +288,13 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 
 	if (!pkg1_id)
 	{
-		s_printf(txt_buf + strlen(txt_buf), "#FFDD00 Unknown pkg1 version for reading#\n#FFDD00 TSEC firmware!#");
+		strcat(txt_buf, "#FFDD00 Unknown pkg1 version for reading#\n#FFDD00 TSEC firmware!#");
 		lv_label_set_text(lb_desc, txt_buf);
 
 		goto out;
 	}
+
+	kb = pkg1_id->kb;
 
 	tsec_ctxt_t tsec_ctxt;
 	tsec_ctxt.fw = (u8 *)pkg1 + pkg1_id->tsec_off;
@@ -275,13 +304,13 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 
 	// Get keys.
 	hos_eks_get();
-	if (pkg1_id->kb >= KB_FIRMWARE_VERSION_700 && !h_cfg.sept_run)
+	if (kb >= KB_FIRMWARE_VERSION_700 && !h_cfg.sept_run)
 	{
 		u32 key_idx = 0;
-		if (pkg1_id->kb >= KB_FIRMWARE_VERSION_810)
+		if (kb >= KB_FIRMWARE_VERSION_810)
 			key_idx = 1;
 
-		if (h_cfg.eks && h_cfg.eks->enabled[key_idx] >= pkg1_id->kb)
+		if (h_cfg.eks && h_cfg.eks->enabled[key_idx] >= kb)
 			h_cfg.sept_run = true;
 		else
 		{
@@ -289,7 +318,7 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 			b_cfg->autoboot_list = 0;
 			b_cfg->extra_cfg = EXTRA_CFG_NYX_BIS;
 
-			if (!reboot_to_sept((u8 *)tsec_ctxt.fw, pkg1_id->kb))
+			if (!reboot_to_sept((u8 *)tsec_ctxt.fw, kb))
 			{
 				lv_label_set_text(lb_desc, "#FFDD00 Failed to run sept#\n");
 				goto out;
@@ -299,10 +328,10 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 
 	// Read the correct keyblob.
 	u8 *keyblob = (u8 *)calloc(NX_EMMC_BLOCKSIZE, 1);
-	sdmmc_storage_read(&emmc_storage, 0x180000 / NX_EMMC_BLOCKSIZE + pkg1_id->kb, 1, keyblob);
+	sdmmc_storage_read(&emmc_storage, 0x180000 / NX_EMMC_BLOCKSIZE + kb, 1, keyblob);
 
 	// Generate BIS keys
-	hos_bis_keygen(keyblob, pkg1_id->kb, &tsec_ctxt);
+	hos_bis_keygen(keyblob, kb, &tsec_ctxt);
 
 	free(keyblob);
 
@@ -352,42 +381,64 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 		cal0->bd_mac[0], cal0->bd_mac[1], cal0->bd_mac[2], cal0->bd_mac[3], cal0->bd_mac[4], cal0->bd_mac[5],
 		cal0->battery_lot);
 
+	u8  display_rev = (nyx_str->info.disp_id >> 8) & 0xFF;
 	u32 display_id = (cal0->lcd_vendor & 0xFF) << 8 | (cal0->lcd_vendor & 0xFF0000) >> 16;
 	switch (display_id)
 	{
 	case PANEL_JDI_LAM062M109A:
-		s_printf(txt_buf + strlen(txt_buf), "JDI LAM062M109A");
+		strcat(txt_buf, "JDI LAM062M109A");
 		break;
 	case PANEL_JDI_LPM062M326A:
-		s_printf(txt_buf + strlen(txt_buf), "JDI LPM062M326A");
+		strcat(txt_buf, "JDI LPM062M326A");
 		break;
 	case PANEL_INL_P062CCA_AZ1:
-		s_printf(txt_buf + strlen(txt_buf), "InnoLux P062CCA-AZ1");
+		strcat(txt_buf, "InnoLux P062CCA-AZ");
+		switch (display_rev)
+		{
+		case 0x93:
+			strcat(txt_buf, "1");
+			break;
+		case 0x95:
+			strcat(txt_buf, "2");
+			break;
+		default:
+			strcat(txt_buf, "X");
+			break;
+		}
 		break;
 	case PANEL_AUO_A062TAN01:
-		s_printf(txt_buf + strlen(txt_buf), "AUO A062TAN01");
+		strcat(txt_buf, "AUO A062TAN0");
+		switch (display_rev)
+		{
+		case 0x94:
+			strcat(txt_buf, "1");
+			break;
+		default:
+			strcat(txt_buf, "X");
+			break;
+		}
 		break;
-	case PANEL_INL_P062CCA_AZ2:
-		s_printf(txt_buf + strlen(txt_buf), "InnoLux P062CCA-AZ2");
+	case PANEL_INL_2J055IA_27A:
+		strcat(txt_buf, "InnoLux 2J055IA-27A");
 		break;
-	case PANEL_AUO_A062TAN02:
-		s_printf(txt_buf + strlen(txt_buf), "AUO A062TAN02");
+	case PANEL_AUO_A055TAN01:
+		strcat(txt_buf, "AUO A055TAN01");
 		break;
 	default:
 		switch (cal0->lcd_vendor & 0xFF)
 		{
 		case 0:
 		case PANEL_JDI_XXX062M:
-			s_printf(txt_buf + strlen(txt_buf), "JDI ");
+			strcat(txt_buf, "JDI ");
 			break;
 		case (PANEL_INL_P062CCA_AZ1 & 0xFF):
-			s_printf(txt_buf + strlen(txt_buf), "InnoLux ");
+			strcat(txt_buf, "InnoLux ");
 			break;
 		case (PANEL_AUO_A062TAN01 & 0xFF):
-			s_printf(txt_buf + strlen(txt_buf), "AUO ");
+			strcat(txt_buf, "AUO ");
 			break;
 		}
-		s_printf(txt_buf + strlen(txt_buf), "Unknown");
+		strcat(txt_buf, "Unknown");
 		break;
 	}
 
@@ -402,7 +453,7 @@ out:
 	sd_unmount();
 	sdmmc_storage_end(&emmc_storage);
 
-	lv_mbox_add_btns(mbox, mbox_btn_map, mbox_action);
+	lv_mbox_add_btns(mbox, mbox_btn_map, _cal0_dump_window_action);
 
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_top(mbox, true);
@@ -463,8 +514,6 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	char *txt_buf = (char *)malloc(0x4000);
 
 	// Decode fuses.
-	u8 burntFuses7 = 0;
-	u8 burntFuses6 = 0;
 	u32 odm4 = fuse_read_odm(4);
 	u8 dram_id = (odm4 >> 3) & 0x1F;
 	char dram_man[16] = {0};
@@ -485,17 +534,11 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 		break;
 	}
 
-	for (u32 i = 0; i < 32; i++)
-	{
-		if ((fuse_read_odm(7) >> i) & 1)
-			burntFuses7++;
-	}
-	for (u32 i = 0; i < 32; i++)
-	{
-		if ((fuse_read_odm(6) >> i) & 1)
-			burntFuses6++;
-	}
+	// Count burnt fuses.
+	u8 burnt_fuses_7 = fuse_count_burnt(fuse_read_odm(7));
+	u8 burnt_fuses_6 = fuse_count_burnt(fuse_read_odm(6));
 
+	// Calculate LOT.
 	u32 lot_code0 = (FUSE(FUSE_OPT_LOT_CODE_0) & 0xFFFFFFF) << 2;
 	u32 lot_bin = 0;
 	for (int i = 0; i < 5; ++i)
@@ -514,7 +557,7 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 		"%d\n%d\n%d (0x%X)\n%d\n%d\n%d\n%d\n"
 		"ID: %02X, Major: A0%d, Minor: %d",
 		FUSE(FUSE_SKU_INFO), odm4 & 0x30000 ? "Mariko" : "Erista", (fuse_read_odm(4) & 3) ? "Dev" : "Retail",
-		dram_id, dram_man, burntFuses7, burntFuses6,
+		dram_id, dram_man, burnt_fuses_7, burnt_fuses_6,
 		byte_swap_32(FUSE(FUSE_PRIVATE_KEY0)), byte_swap_32(FUSE(FUSE_PRIVATE_KEY1)),
 		byte_swap_32(FUSE(FUSE_PRIVATE_KEY2)), byte_swap_32(FUSE(FUSE_PRIVATE_KEY3)),
 		byte_swap_32(FUSE(FUSE_PRIVATE_KEY4)),
@@ -550,32 +593,32 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	switch (ram_vendor.dev0_ch0)
 	{
 	case 1:
-		s_printf(txt_buf + strlen(txt_buf), "Samsung");
+		strcat(txt_buf, "Samsung");
 		break;
 	case 6:
-		s_printf(txt_buf + strlen(txt_buf), "Hynix");
+		strcat(txt_buf, "Hynix");
 		break;
 	case 255:
-		s_printf(txt_buf + strlen(txt_buf), "Micron");
+		strcat(txt_buf, "Micron");
 		break;
 	default:
-		s_printf(txt_buf + strlen(txt_buf), "Unknown");
+		strcat(txt_buf, "Unknown");
 		break;
 	}
 	s_printf(txt_buf + strlen(txt_buf), " (%d) #FF8000 |# ", ram_vendor.dev0_ch0);
 	switch (ram_vendor.dev1_ch0)
 	{
 	case 1:
-		s_printf(txt_buf + strlen(txt_buf), "Samsung");
+		strcat(txt_buf, "Samsung");
 		break;
 	case 6:
-		s_printf(txt_buf + strlen(txt_buf), "Hynix");
+		strcat(txt_buf, "Hynix");
 		break;
 	case 255:
-		s_printf(txt_buf + strlen(txt_buf), "Micron");
+		strcat(txt_buf, "Micron");
 		break;
 	default:
-		s_printf(txt_buf + strlen(txt_buf), "Unknown");
+		strcat(txt_buf, "Unknown");
 		break;
 	}
 	s_printf(txt_buf + strlen(txt_buf), " (%d)\n#FF8000 Rev ID:# %04X #FF8000 |# %04X\n#FF8000 Density:# ",
@@ -583,75 +626,97 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	switch ((ram_density.dev0_ch0 & 0x3C) >> 2)
 	{
 	case 2:
-		s_printf(txt_buf + strlen(txt_buf), "4x512MB");
+		strcat(txt_buf, "4x512MB");
 		break;
 	case 3:
-		s_printf(txt_buf + strlen(txt_buf), "4x768MB");
+		strcat(txt_buf, "4x768MB");
 		break;
 	case 4:
-		s_printf(txt_buf + strlen(txt_buf), "4x1GB");
+		strcat(txt_buf, "4x1GB");
 		break;
 	default:
-		s_printf(txt_buf + strlen(txt_buf), "4xUnk");
+		strcat(txt_buf, "4xUnk");
 		break;
 	}
 	s_printf(txt_buf + strlen(txt_buf), " (%d) #FF8000 |# ", (ram_density.dev0_ch0 & 0x3C) >> 2);
 	switch ((ram_density.dev1_ch0 & 0x3C) >> 2)
 	{
 	case 2:
-		s_printf(txt_buf + strlen(txt_buf), "4x512MB");
+		strcat(txt_buf, "4x512MB");
 		break;
 	case 3:
-		s_printf(txt_buf + strlen(txt_buf), "4x768MB");
+		strcat(txt_buf, "4x768MB");
 		break;
 	case 4:
-		s_printf(txt_buf + strlen(txt_buf), "4x1GB");
+		strcat(txt_buf, "4x1GB");
 		break;
 	default:
-		s_printf(txt_buf + strlen(txt_buf), "2xUnk");
+		strcat(txt_buf, "2xUnk");
 		break;
 	}
 	s_printf(txt_buf + strlen(txt_buf), " (%d)\n\n", (ram_density.dev1_ch0 & 0x3C) >> 2);
 
 	// Display info.
+	u8  display_rev = (nyx_str->info.disp_id >> 8) & 0xFF;
 	u32 display_id = ((nyx_str->info.disp_id >> 8) & 0xFF00) | (nyx_str->info.disp_id & 0xFF);
 
-	s_printf(txt_buf + strlen(txt_buf), "#00DDFF Display Panel:#\n#FF8000 Model:# ");
+	strcat(txt_buf, "#00DDFF Display Panel:#\n#FF8000 Model:# ");
 
 	switch (display_id)
 	{
 	case PANEL_JDI_LAM062M109A:
-		s_printf(txt_buf + strlen(txt_buf), "JDI LAM062M109A");
+		strcat(txt_buf, "JDI LAM062M109A");
 		break;
 	case PANEL_JDI_LPM062M326A:
-		s_printf(txt_buf + strlen(txt_buf), "JDI LPM062M326A");
+		strcat(txt_buf, "JDI LPM062M326A");
 		break;
 	case PANEL_INL_P062CCA_AZ1:
-		s_printf(txt_buf + strlen(txt_buf), "InnoLux P062CCA-AZ1");
+		strcat(txt_buf, "InnoLux P062CCA-AZ");
+		switch (display_rev)
+		{
+		case 0x93:
+			strcat(txt_buf, "1");
+			break;
+		case 0x95:
+			strcat(txt_buf, "2");
+			break;
+		default:
+			strcat(txt_buf, "X #FFDD00 Contact me!#");
+			break;
+		}
 		break;
 	case PANEL_AUO_A062TAN01:
-		s_printf(txt_buf + strlen(txt_buf), "AUO A062TAN01");
+		strcat(txt_buf, "AUO A062TAN0");
+		switch (display_rev)
+		{
+		case 0x94:
+			strcat(txt_buf, "1");
+			break;
+		default:
+			strcat(txt_buf, "X #FFDD00 Contact me!#");
+			break;
+		}
 		break;
-	case PANEL_INL_P062CCA_AZ2:
-		s_printf(txt_buf + strlen(txt_buf), "InnoLux P062CCA-AZ2");
+	case PANEL_INL_2J055IA_27A:
+		strcat(txt_buf, "InnoLux 2J055IA-27A");
 		break;
-	case PANEL_AUO_A062TAN02:
-		s_printf(txt_buf + strlen(txt_buf), "AUO A062TAN02");
+	case PANEL_AUO_A055TAN01:
+		strcat(txt_buf, "AUO A055TAN01");
 		break;
 	default:
 		switch (display_id & 0xFF)
 		{
 		case PANEL_JDI_XXX062M:
-			s_printf(txt_buf + strlen(txt_buf), "JDI ");
+			strcat(txt_buf, "JDI ");
 			break;
 		case (PANEL_INL_P062CCA_AZ1 & 0xFF):
-			s_printf(txt_buf + strlen(txt_buf), "InnoLux ");
+			strcat(txt_buf, "InnoLux ");
 			break;
 		case (PANEL_AUO_A062TAN01 & 0xFF):
-			s_printf(txt_buf + strlen(txt_buf), "AUO ");
+			strcat(txt_buf, "AUO ");
 			break;
 		}
-		s_printf(txt_buf + strlen(txt_buf), "Unknown");
+		strcat(txt_buf, "Unknown #FFDD00 Contact me!#");
 		break;
 	}
 
@@ -662,30 +727,30 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 
 	if (!touch_get_fw_info(&touch_fw))
 	{
-		s_printf(txt_buf + strlen(txt_buf), "\n\n#00DDFF Touch Panel:#\n#FF8000 Model:# ");
+		strcat(txt_buf, "\n\n#00DDFF Touch Panel:#\n#FF8000 Model:# ");
 		switch (touch_fw.fw_id)
 		{
 		case 0x100100:
-			s_printf(txt_buf + strlen(txt_buf), "NTD 4CD 1601");
+			strcat(txt_buf, "NTD 4CD 1601");
 			break;
 		case 0x00120100:
 		case 0x32000001:
-			s_printf(txt_buf + strlen(txt_buf), "NTD 4CD 1801");
+			strcat(txt_buf, "NTD 4CD 1801");
 			break;
 		case 0x001A0300:
 		case 0x32000102:
-			s_printf(txt_buf + strlen(txt_buf), "NTD 4CD 2602");
+			strcat(txt_buf, "NTD 4CD 2602");
 			break;
 		case 0x00290100:
 		case 0x32000302:
-			s_printf(txt_buf + strlen(txt_buf), "NTD 4CD 3801");
+			strcat(txt_buf, "NTD 4CD 3801");
 			break;
 		case 0x31051820:
 		case 0x32000402:
-			s_printf(txt_buf + strlen(txt_buf), "NTD 4CD XXXX");
+			strcat(txt_buf, "NTD 4CD XXXX");
 			break;
 		default:
-			s_printf(txt_buf + strlen(txt_buf), "Unknown");
+			strcat(txt_buf, "Unknown");
 		}
 
 		s_printf(txt_buf + strlen(txt_buf), "\n#FF8000 ID:# %X\n#FF8000 FTB ver:# %04X\n#FF8000 FW rev:# %04X",
@@ -694,9 +759,9 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 
 	// Check if patched unit.
 	if (!fuse_check_patched_rcm())
-		s_printf(txt_buf + strlen(txt_buf), "\n\n#96FF00 Your unit is exploitable#\n#96FF00 to the RCM bug!#");
+		strcat(txt_buf, "\n\n#96FF00 Your unit is exploitable#\n#96FF00 to the RCM bug!#");
 	else
-		s_printf(txt_buf + strlen(txt_buf), "\n\n#FF8000 Your unit is patched#\n#FF8000 to the RCM bug!#");
+		strcat(txt_buf, "\n\n#FF8000 Your unit is patched#\n#FF8000 to the RCM bug!#");
 
 	lv_label_set_text(lb_desc2, txt_buf);
 
@@ -730,7 +795,7 @@ static void _ipatch_process(u32 offset, u32 value)
 		s_printf(ipatches_txt + strlen(ipatches_txt), "SVC ##0x%02X", lo);
 		break;
 	}
-	s_printf(ipatches_txt + strlen(ipatches_txt), "\n");
+	strcat(ipatches_txt, "\n");
 }
 
 static lv_res_t _create_window_bootrom_info_status(lv_obj_t *btn)
@@ -799,7 +864,7 @@ static lv_res_t _create_window_tsec_keys_status(lv_obj_t *btn)
 
 	if (!pkg1_id)
 	{
-		s_printf(txt_buf + strlen(txt_buf), "#FFDD00 Unknown pkg1 version for reading#\n#FFDD00 TSEC firmware!#");
+		strcat(txt_buf, "#FFDD00 Unknown pkg1 version for reading#\n#FFDD00 TSEC firmware!#");
 		lv_label_set_text(lb_desc, txt_buf);
 		lv_obj_set_width(lb_desc, lv_obj_get_width(desc));
 
@@ -859,7 +924,7 @@ static lv_res_t _create_window_tsec_keys_status(lv_obj_t *btn)
 		}
 	}
 
-	s_printf(txt_buf + strlen(txt_buf), "#C7EA46 TSEC Key:#\n");
+	strcat(txt_buf, "#C7EA46 TSEC Key:#\n");
 	if (res >= 0)
 	{
 		s_printf(txt_buf2, "\n%08X%08X%08X%08X\n",
@@ -867,7 +932,7 @@ static lv_res_t _create_window_tsec_keys_status(lv_obj_t *btn)
 
 		if (pkg1_id->kb == KB_FIRMWARE_VERSION_620)
 		{
-			s_printf(txt_buf + strlen(txt_buf), "#C7EA46 TSEC root:#\n");
+			strcat(txt_buf, "#C7EA46 TSEC root:#\n");
 			s_printf(txt_buf2 + strlen(txt_buf2), "%08X%08X%08X%08X\n",
 				byte_swap_32(tsec_keys[4]), byte_swap_32(tsec_keys[5]), byte_swap_32(tsec_keys[6]), byte_swap_32(tsec_keys[7]));
 		}
@@ -959,7 +1024,7 @@ static lv_res_t _create_mbox_benchmark(bool sd_bench)
 
 			u32 timer = get_tmr_ms();
 
-			s_printf(txt_buf + strlen(txt_buf), "\n");
+			strcat(txt_buf, "\n");
 			lv_mbox_set_text(mbox, txt_buf);
 
 			while (data_remaining)
@@ -1143,7 +1208,7 @@ static lv_res_t _create_window_emmc_info_status(lv_obj_t *btn)
 		{
 			if (idx > 10)
 			{
-				s_printf(txt_buf + strlen(txt_buf), "#FFDD00 Table truncated!#");
+				strcat(txt_buf, "#FFDD00 Table truncated!#");
 				break;
 			}
 
@@ -1256,13 +1321,29 @@ static lv_res_t _create_window_sdcard_info_status(lv_obj_t *btn)
 
 		lv_obj_t * lb_val2 = lv_label_create(val2, lb_desc);
 
+		char *wp_info;
+		switch (sd_storage.csd.write_protect)
+		{
+		case 1:
+			wp_info = "Temporary";
+			break;
+		case 2:
+		case 3:
+			wp_info = "Permanent";
+			break;
+		default:
+			wp_info = "None";
+			break;
+		}
+
 		s_printf(txt_buf,
-			"#00DDFF v%d.0#\n%02X\n%d MiB\n%X\n%d\n%d MB/s (%d MHz)\n%d\nU%d\nV%d\nA%d\n%d",
-			sd_storage.csd.structure + 1, sd_storage.csd.cmdclass, sd_storage.sec_cnt >> 11, sd_storage.sec_cnt,
+			"#00DDFF v%d.0#\n%02X\n%d MiB\n%X (CP %X)\n%d\n%d MB/s (%d MHz)\n%d\nU%d\nV%d\nA%d\n%s",
+			sd_storage.csd.structure + 1, sd_storage.csd.cmdclass,
+			sd_storage.sec_cnt >> 11, sd_storage.sec_cnt, sd_storage.ssr.protected_size >> 9,
 			sd_storage.ssr.bus_width, sd_storage.csd.busspeed,
 			(sd_storage.csd.busspeed > 10) ? (sd_storage.csd.busspeed * 2) : 50,
 			sd_storage.ssr.speed_class, sd_storage.ssr.uhs_grade, sd_storage.ssr.video_class,
-			sd_storage.ssr.app_class, sd_storage.csd.write_protect);
+			sd_storage.ssr.app_class, wp_info);
 
 		lv_label_set_text(lb_val2, txt_buf);
 
@@ -1483,16 +1564,16 @@ static lv_res_t _create_window_battery_status(lv_obj_t *btn)
 	switch (value)
 	{
 	case 0:
-		s_printf(txt_buf + strlen(txt_buf), "Not charging\n");
+		strcat(txt_buf, "Not charging\n");
 		break;
 	case 1:
-		s_printf(txt_buf + strlen(txt_buf), "Pre-charging\n");
+		strcat(txt_buf, "Pre-charging\n");
 		break;
 	case 2:
-		s_printf(txt_buf + strlen(txt_buf), "Fast charging\n");
+		strcat(txt_buf, "Fast charging\n");
 		break;
 	case 3:
-		s_printf(txt_buf + strlen(txt_buf), "Charge terminated\n");
+		strcat(txt_buf, "Charge terminated\n");
 		break;
 	default:
 		s_printf(txt_buf + strlen(txt_buf), "Unknown (%d)\n", value);
@@ -1503,19 +1584,19 @@ static lv_res_t _create_window_battery_status(lv_obj_t *btn)
 	switch (value)
 	{
 	case 0:
-		s_printf(txt_buf + strlen(txt_buf), "Normal");
+		strcat(txt_buf, "Normal");
 		break;
 	case 2:
-		s_printf(txt_buf + strlen(txt_buf), "Warm");
+		strcat(txt_buf, "Warm");
 		break;
 	case 3:
-		s_printf(txt_buf + strlen(txt_buf), "Cool");
+		strcat(txt_buf, "Cool");
 		break;
 	case 5:
-		s_printf(txt_buf + strlen(txt_buf), "Cold");
+		strcat(txt_buf, "Cold");
 		break;
 	case 6:
-		s_printf(txt_buf + strlen(txt_buf), "Hot");
+		strcat(txt_buf, "Hot");
 		break;
 	default:
 		s_printf(txt_buf + strlen(txt_buf), "Unknown (%d)", value);

@@ -44,6 +44,7 @@
 #include <soc/fuse.h>
 #include <soc/hw_init.h>
 #include <soc/i2c.h>
+#include <soc/pmc.h>
 #include <soc/t210.h>
 #include <soc/uart.h>
 #include "storage/emummc.h"
@@ -255,12 +256,12 @@ int launch_payload(char *path, bool update)
 			else
 				reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, ALIGN(size, 0x10));
 
-			reconfig_hw_workaround(false, byte_swap_32(*(u32 *)(buf + size - sizeof(u32))));
+			hw_reinit_workaround(false, byte_swap_32(*(u32 *)(buf + size - sizeof(u32))));
 		}
 		else
 		{
 			reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, 0x7000);
-			reconfig_hw_workaround(true, 0);
+			hw_reinit_workaround(true, 0);
 		}
 
 		// Some cards (Sandisk U1), do not like a fast power cycle. Wait min 100ms.
@@ -692,7 +693,7 @@ void nyx_load_run()
 		WPRINTF("\nUpdate your bootloader folder!\n\n");
 		WPRINTF("Press any key...");
 
-		msleep(2000);
+		msleep(1000);
 		btn_wait();
 	}
 
@@ -1127,10 +1128,10 @@ static void _patched_rcm_protection()
 }
 
 #define EXCP_EN_ADDR   0x4003FFFC
-#define  EXCP_MAGIC 0x30505645 // EVP0
+#define  EXCP_MAGIC 0x30505645      // EVP0
 #define EXCP_TYPE_ADDR 0x4003FFF8
-#define  EXCP_TYPE_RESET 0x545352 // RST
-#define  EXCP_TYPE_UNDEF 0x464455 // UDF
+#define  EXCP_TYPE_RESET 0x545352   // RST
+#define  EXCP_TYPE_UNDEF 0x464455   // UDF
 #define  EXCP_TYPE_PABRT 0x54424150 // PABT
 #define  EXCP_TYPE_DABRT 0x54424144 // DABT
 #define EXCP_LR_ADDR   0x4003FFF4
@@ -1144,6 +1145,14 @@ static void _show_errors()
 	if (*excp_enabled == EXCP_MAGIC)
 		h_cfg.errors |= ERR_EXCEPT_ENB;
 
+	//! FIXME: Find a better way to identify if that scratch has proper data.
+	if (0 && PMC(APBDEV_PMC_SCRATCH37) & PMC_SCRATCH37_KERNEL_PANIC_FLAG)
+	{
+		// Set error and clear flag.
+		h_cfg.errors |= ERR_L4T_KERNEL;
+		PMC(APBDEV_PMC_SCRATCH37) &= ~PMC_SCRATCH37_KERNEL_PANIC_FLAG;
+	}
+
 	if (h_cfg.errors)
 	{
 		gfx_clear_grey(0x1B);
@@ -1152,10 +1161,10 @@ static void _show_errors()
 
 		if (h_cfg.errors & ERR_LIBSYS_LP0)
 			WPRINTF("Missing LP0 (sleep mode) lib!\n");
-		if (h_cfg.errors & ERR_SYSOLD_MTC)
+		if (h_cfg.errors & ERR_LIBSYS_MTC)
 			WPRINTF("Missing or old Minerva lib!\n");
 
-		if (h_cfg.errors & ~ERR_EXCEPT_ENB)
+		if (h_cfg.errors & ~(ERR_EXCEPT_ENB | ERR_L4T_KERNEL))
 		{
 			WPRINTF("\nUpdate bootloader folder!\n\n");
 		}
@@ -1166,16 +1175,16 @@ static void _show_errors()
 			switch (*excp_type)
 			{
 			case EXCP_TYPE_RESET:
-				WPRINTF("Reset");
+				WPRINTF("RST");
 				break;
 			case EXCP_TYPE_UNDEF:
-				WPRINTF("Undefined instruction");
+				WPRINTF("UNDEF");
 				break;
 			case EXCP_TYPE_PABRT:
-				WPRINTF("Prefetch abort");
+				WPRINTF("PABRT");
 				break;
 			case EXCP_TYPE_DABRT:
-				WPRINTF("Data abort");
+				WPRINTF("DABRT");
 				break;
 			}
 			WPRINTF("\n");
@@ -1184,9 +1193,16 @@ static void _show_errors()
 			*excp_enabled = 0;
 		}
 
+		if (h_cfg.errors & ERR_L4T_KERNEL)
+		{
+			WPRINTF("Panic occurred while running L4T.\n");
+			if (!sd_save_to_file((void *)PSTORE_ADDR, PSTORE_SZ, "L4T_panic.bin"))
+				WPRINTF("PSTORE saved to L4T_panic.bin\n");
+		}
+
 		WPRINTF("Press any key...");
 
-		msleep(2000);
+		msleep(1000);
 		btn_wait();
 	}
 }
@@ -1452,14 +1468,14 @@ ment_t ment_top[] = {
 	MDEF_END()
 };
 
-menu_t menu_top = { ment_top, "hekate - CTCaer mod v5.3.0", 0, 0 };
+menu_t menu_top = { ment_top, "hekate - CTCaer mod v5.3.2", 0, 0 };
 
 extern void pivot_stack(u32 stack_top);
 
 void ipl_main()
 {
 	// Do initial HW configuration. This is compatible with consecutive reruns without a reset.
-	config_hw();
+	hw_init();
 
 	// Pivot the stack so we have enough space.
 	pivot_stack(IPL_STACK_TOP);
@@ -1486,7 +1502,7 @@ void ipl_main()
 
 	// Train DRAM and switch to max frequency.
 	if (minerva_init())
-		h_cfg.errors |= ERR_SYSOLD_MTC;
+		h_cfg.errors |= ERR_LIBSYS_MTC;
 
 	display_init();
 

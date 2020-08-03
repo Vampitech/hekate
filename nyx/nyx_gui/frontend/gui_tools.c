@@ -173,16 +173,17 @@ static lv_res_t _create_mbox_hid(usb_ctxt_t *usbs)
 	lv_obj_t *mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 
-	char *text_buf = malloc(0x1000);
+	char *txt_buf = malloc(0x1000);
 
-	s_printf(text_buf, "#FF8000 HID Emulation#\n\n#C7EA46 Device:# ");
+	s_printf(txt_buf, "#FF8000 HID Emulation#\n\n#C7EA46 Device:# ");
 
 	if (usbs->type == USB_HID_GAMEPAD)
-		s_printf(text_buf + strlen(text_buf), "Gamepad");
+		strcat(txt_buf, "Gamepad");
 	else
-		s_printf(text_buf + strlen(text_buf), "Touchpad");
+		strcat(txt_buf, "Touchpad");
 
-	lv_mbox_set_text(mbox, text_buf);
+	lv_mbox_set_text(mbox, txt_buf);
+	free(txt_buf);
 
 	lv_obj_t *lbl_status = lv_label_create(mbox, NULL);
 	lv_label_set_recolor(lbl_status, true);
@@ -217,25 +218,25 @@ static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs)
 	lv_obj_t *mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 
-	char *text_buf = malloc(0x1000);
+	char *txt_buf = malloc(0x1000);
 
-	s_printf(text_buf, "#FF8000 USB Mass Storage#\n\n#C7EA46 Device:# ");
+	s_printf(txt_buf, "#FF8000 USB Mass Storage#\n\n#C7EA46 Device:# ");
 
 	if (usbs->type == MMC_SD)
 	{
 		switch (usbs->partition)
 		{
 		case 0:
-			s_printf(text_buf + strlen(text_buf), "SD Card");
+			strcat(txt_buf, "SD Card");
 			break;
 		case EMMC_GPP + 1:
-			s_printf(text_buf + strlen(text_buf), "emuMMC GPP");
+			strcat(txt_buf, "emuMMC GPP");
 			break;
 		case EMMC_BOOT0 + 1:
-			s_printf(text_buf + strlen(text_buf), "emuMMC BOOT0");
+			strcat(txt_buf, "emuMMC BOOT0");
 			break;
 		case EMMC_BOOT1 + 1:
-			s_printf(text_buf + strlen(text_buf), "emuMMC BOOT1");
+			strcat(txt_buf, "emuMMC BOOT1");
 			break;
 		}
 	}
@@ -244,18 +245,19 @@ static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs)
 		switch (usbs->partition)
 		{
 		case EMMC_GPP + 1:
-			s_printf(text_buf + strlen(text_buf), "eMMC GPP");
+			strcat(txt_buf, "eMMC GPP");
 			break;
 		case EMMC_BOOT0 + 1:
-			s_printf(text_buf + strlen(text_buf), "eMMC BOOT0");
+			strcat(txt_buf, "eMMC BOOT0");
 			break;
 		case EMMC_BOOT1 + 1:
-			s_printf(text_buf + strlen(text_buf), "eMMC BOOT1");
+			strcat(txt_buf, "eMMC BOOT1");
 			break;
 		}
 	}
 
-	lv_mbox_set_text(mbox, text_buf);
+	lv_mbox_set_text(mbox, txt_buf);
+	free(txt_buf);
 
 	lv_obj_t *lbl_status = lv_label_create(mbox, NULL);
 	lv_label_set_recolor(lbl_status, true);
@@ -947,7 +949,7 @@ static lv_res_t _create_mbox_fix_touchscreen(lv_obj_t *btn)
 	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 
-	char *txt_buf = malloc(0x1000);
+	char *txt_buf = malloc(0x4000);
 	strcpy(txt_buf, "#FF8000 Don't touch the screen!#\n\nThe tuning process will start in ");
 	u32 text_idx = strlen(txt_buf);
 	lv_mbox_set_text(mbox, txt_buf);
@@ -994,45 +996,45 @@ static lv_res_t _create_mbox_fix_touchscreen(lv_obj_t *btn)
 			switch (err[0])
 			{
 			case ITO_FORCE_OPEN:
-				s_printf(txt_buf + strlen(txt_buf), "Force Open");
+				strcat(txt_buf, "Force Open");
 				break;
 			case ITO_SENSE_OPEN:
-				s_printf(txt_buf + strlen(txt_buf), "Sense Open");
+				strcat(txt_buf, "Sense Open");
 				break;
 			case ITO_FORCE_SHRT_GND:
-				s_printf(txt_buf + strlen(txt_buf), "Force Short to GND");
+				strcat(txt_buf, "Force Short to GND");
 				break;
 			case ITO_SENSE_SHRT_GND:
-				s_printf(txt_buf + strlen(txt_buf), "Sense Short to GND");
+				strcat(txt_buf, "Sense Short to GND");
 				break;
 			case ITO_FORCE_SHRT_VCM:
-				s_printf(txt_buf + strlen(txt_buf), "Force Short to VDD");
+				strcat(txt_buf, "Force Short to VDD");
 				break;
 			case ITO_SENSE_SHRT_VCM:
-				s_printf(txt_buf + strlen(txt_buf), "Sense Short to VDD");
+				strcat(txt_buf, "Sense Short to VDD");
 				break;
 			case ITO_FORCE_SHRT_FORCE:
-				s_printf(txt_buf + strlen(txt_buf), "Force Short to Force");
+				strcat(txt_buf, "Force Short to Force");
 				break;
 			case ITO_SENSE_SHRT_SENSE:
-				s_printf(txt_buf + strlen(txt_buf), "Sense Short to Sense");
+				strcat(txt_buf, "Sense Short to Sense");
 				break;
 			case ITO_F2E_SENSE:
-				s_printf(txt_buf + strlen(txt_buf), "Force Short to Sense");
+				strcat(txt_buf, "Force Short to Sense");
 				break;
 			case ITO_FPC_FORCE_OPEN:
-				s_printf(txt_buf + strlen(txt_buf), "FPC Force Open");
+				strcat(txt_buf, "FPC Force Open");
 				break;
 			case ITO_FPC_SENSE_OPEN:
-				s_printf(txt_buf + strlen(txt_buf), "FPC Sense Open");
+				strcat(txt_buf, "FPC Sense Open");
 				break;
 			default:
-				s_printf(txt_buf + strlen(txt_buf), "Unknown");
+				strcat(txt_buf, "Unknown");
 				break;
 
 			}
 			s_printf(txt_buf + strlen(txt_buf), " (%d), Chn: %d#\n\n", err[0], err[1]);
-			s_printf(txt_buf + strlen(txt_buf), "#FFFF00 The touchscreen calibration failed!");
+			strcat(txt_buf, "#FFFF00 The touchscreen calibration failed!");
 			lv_mbox_set_text(mbox, txt_buf);
 			goto out2;
 		}
@@ -1079,15 +1081,14 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	char path[128];
 
+	u8 kb = 0;
 	u8 *pkg1 = (u8 *)calloc(1, 0x40000);
 	u8 *warmboot = (u8 *)calloc(1, 0x40000);
 	u8 *secmon = (u8 *)calloc(1, 0x40000);
 	u8 *loader = (u8 *)calloc(1, 0x40000);
 	u8 *pkg2 = NULL;
-	u8 kb = 0;
 
 	char *txt_buf  = (char *)malloc(0x4000);
-	char *txt_buf2 = (char *)malloc(0x4000);
 
 	tsec_ctxt_t tsec_ctxt;
 
@@ -1116,8 +1117,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	// Dump package1 in its encrypted state if unknown.
 	if (!pkg1_id)
 	{
-		s_printf(txt_buf + strlen(txt_buf),
-			"#FFDD00 Unknown pkg1 version for reading#\n#FFDD00 TSEC firmware!#");
+		strcat(txt_buf, "#FFDD00 Unknown pkg1 version for reading#\n#FFDD00 TSEC firmware!#");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
@@ -1125,14 +1125,12 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 		if (sd_save_to_file(pkg1, 0x40000, path))
 			goto out_free;
 
-		s_printf(txt_buf + strlen(txt_buf), "\nEncrypted pkg1 dumped to pkg1_enc.bin");
+		strcat(txt_buf, "\nEncrypted pkg1 dumped to pkg1_enc.bin");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
 		goto out_free;
 	}
-
-	const pk11_hdr_t *hdr = (pk11_hdr_t *)(pkg1 + pkg1_id->pkg11_off + 0x20);
 
 	kb = pkg1_id->kb;
 
@@ -1183,7 +1181,21 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	if (kb <= KB_FIRMWARE_VERSION_620)
 	{
-		pkg1_unpack(warmboot, secmon, loader, pkg1_id, pkg1);
+		const u8 *sec_map = pkg1_unpack(warmboot, secmon, loader, pkg1_id, pkg1);
+
+		pk11_hdr_t *hdr_pk11 = (pk11_hdr_t *)(pkg1 + pkg1_id->pkg11_off + 0x20);
+
+		// Use correct sizes.
+		u32 sec_size[3] = { hdr_pk11->wb_size, hdr_pk11->ldr_size, hdr_pk11->sm_size };
+		for (u32 i = 0; i < 3; i++)
+		{
+			if (sec_map[i] == PK11_SECTION_WB)
+				hdr_pk11->wb_size = sec_size[i];
+			else if (sec_map[i] == PK11_SECTION_LD)
+				hdr_pk11->ldr_size = sec_size[i];
+			else if (sec_map[i] == PK11_SECTION_SM)
+				hdr_pk11->sm_size = sec_size[i];
+		}
 
 		// Display info.
 		s_printf(txt_buf + strlen(txt_buf),
@@ -1192,7 +1204,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 			"#C7EA46 Secure monitor size: #0x%05X\n"
 			"#C7EA46 Warmboot addr:       #0x%05X\n"
 			"#C7EA46 Warmboot size:       #0x%05X\n\n",
-			hdr->ldr_size, pkg1_id->secmon_base, hdr->sm_size, pkg1_id->warmboot_base, hdr->wb_size);
+			hdr_pk11->ldr_size, pkg1_id->secmon_base, hdr_pk11->sm_size, pkg1_id->warmboot_base, hdr_pk11->wb_size);
 
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
@@ -1201,31 +1213,31 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 		emmcsn_path_impl(path, "/pkg1", "pkg1_decr.bin", &storage);
 		if (sd_save_to_file(pkg1, 0x40000, path))
 			goto out_free;
-		s_printf(txt_buf + strlen(txt_buf), "pkg1 dumped to pkg1_decr.bin\n");
+		strcat(txt_buf, "pkg1 dumped to pkg1_decr.bin\n");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
 		// Dump nxbootloader.
 		emmcsn_path_impl(path, "/pkg1", "nxloader.bin", &storage);
-		if (sd_save_to_file(loader, hdr->ldr_size, path))
+		if (sd_save_to_file(loader, hdr_pk11->ldr_size, path))
 			goto out_free;
-		s_printf(txt_buf + strlen(txt_buf), "NX Bootloader dumped to nxloader.bin\n");
+		strcat(txt_buf, "NX Bootloader dumped to nxloader.bin\n");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
 		// Dump secmon.
 		emmcsn_path_impl(path, "/pkg1", "secmon.bin", &storage);
-		if (sd_save_to_file(secmon, hdr->sm_size, path))
+		if (sd_save_to_file(secmon, hdr_pk11->sm_size, path))
 			goto out_free;
-		s_printf(txt_buf + strlen(txt_buf), "Secure Monitor dumped to secmon.bin\n");
+		strcat(txt_buf, "Secure Monitor dumped to secmon.bin\n");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
 		// Dump warmboot.
 		emmcsn_path_impl(path, "/pkg1", "warmboot.bin", &storage);
-		if (sd_save_to_file(warmboot, hdr->wb_size, path))
+		if (sd_save_to_file(warmboot, hdr_pk11->wb_size, path))
 			goto out_free;
-		s_printf(txt_buf + strlen(txt_buf), "Warmboot dumped to warmboot.bin\n\n");
+		strcat(txt_buf, "Warmboot dumped to warmboot.bin\n\n");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 	}
@@ -1262,7 +1274,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	pkg2_hdr_t *pkg2_hdr = pkg2_decrypt(pkg2, kb);
 	if (!pkg2_hdr)
 	{
-		s_printf(txt_buf + strlen(txt_buf), "#FFDD00 Pkg2 decryption failed!#");
+		strcat(txt_buf, "#FFDD00 Pkg2 decryption failed!#");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
@@ -1287,7 +1299,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	emmcsn_path_impl(path, "/pkg2", "pkg2_decr.bin", &storage);
 	if (sd_save_to_file(pkg2, pkg2_hdr->sec_size[PKG2_SEC_KERNEL] + pkg2_hdr->sec_size[PKG2_SEC_INI1], path))
 		goto out;
-	s_printf(txt_buf + strlen(txt_buf), "pkg2 dumped to pkg2_decr.bin\n");
+	strcat(txt_buf, "pkg2 dumped to pkg2_decr.bin\n");
 	lv_label_set_text(lb_desc, txt_buf);
 	manual_system_maintenance(true);
 
@@ -1295,7 +1307,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	emmcsn_path_impl(path, "/pkg2", "kernel.bin", &storage);
 	if (sd_save_to_file(pkg2_hdr->data, pkg2_hdr->sec_size[PKG2_SEC_KERNEL], path))
 		goto out;
-	s_printf(txt_buf + strlen(txt_buf), "Kernel dumped to kernel.bin\n");
+	strcat(txt_buf, "Kernel dumped to kernel.bin\n");
 	lv_label_set_text(lb_desc, txt_buf);
 	manual_system_maintenance(true);
 
@@ -1311,7 +1323,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	if (!ini1_off)
 	{
-		s_printf(txt_buf + strlen(txt_buf), "#FFDD00 Failed to dump INI1 and kips!#\n");
+		strcat(txt_buf, "#FFDD00 Failed to dump INI1 and kips!#\n");
 		goto out;
 	}
 
@@ -1320,7 +1332,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	if (sd_save_to_file(ini1, ini1_size, path))
 		goto out;
 
-	s_printf(txt_buf + strlen(txt_buf), "INI1 dumped to ini1.bin\n\n");
+	strcat(txt_buf, "INI1 dumped to ini1.bin\n\n");
 	lv_label_set_text(lb_desc, txt_buf);
 	manual_system_maintenance(true);
 
@@ -1367,7 +1379,6 @@ out_free:
 	free(loader);
 	free(pkg2);
 	free(txt_buf);
-	free(txt_buf2);
 	sdmmc_storage_end(&storage);
 	sd_unmount();
 
@@ -1616,7 +1627,7 @@ static void _create_tab_tools_arc_autorcm(lv_theme_t *th, lv_obj_t *parent)
 		"#FF3C28 bootloader.#");
 
 	if (h_cfg.rcm_patched)
-		s_printf(txt_buf + strlen(txt_buf), " #FF8000 This is disabled because this unit is patched!#");
+		strcat(txt_buf, " #FF8000 This is disabled because this unit is patched!#");
 
 	lv_obj_t *label_txt4 = lv_label_create(h2, NULL);
 	lv_label_set_recolor(label_txt4, true);
