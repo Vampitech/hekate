@@ -359,7 +359,7 @@ void nyx_init_load_res()
 	load_saved_configuration();
 
 	FIL fp;
-	if (!f_open(&fp, "bootloader/sys/res.pak", FA_READ))
+	if (!f_open(&fp, "NEXT/sys/res.pak", FA_READ))
 	{
 		f_read(&fp, (void *)NYX_RES_ADDR, f_size(&fp), NULL);
 		f_close(&fp);
