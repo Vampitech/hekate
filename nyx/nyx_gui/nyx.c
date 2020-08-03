@@ -185,12 +185,12 @@ lv_res_t launch_payload(lv_obj_t *list)
 		if (size < 0x30000)
 		{
 			reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, ALIGN(size, 0x10));
-			reconfig_hw_workaround(false, byte_swap_32(*(u32 *)(buf + size - sizeof(u32))));
+			hw_reinit_workaround(false, byte_swap_32(*(u32 *)(buf + size - sizeof(u32))));
 		}
 		else
 		{
 			reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, 0x7000);
-			reconfig_hw_workaround(true, 0);
+			hw_reinit_workaround(true, 0);
 		}
 
 		void (*ext_payload_ptr)() = (void *)EXT_PAYLOAD_ADDR;
@@ -281,10 +281,10 @@ void load_saved_configuration()
 }
 
 #define EXCP_EN_ADDR   0x4003FFFC
-#define  EXCP_MAGIC 0x30505645 // EVP0
+#define  EXCP_MAGIC 0x30505645      // EVP0
 #define EXCP_TYPE_ADDR 0x4003FFF8
-#define  EXCP_TYPE_RESET 0x545352 // RST
-#define  EXCP_TYPE_UNDEF 0x464455 // UDF
+#define  EXCP_TYPE_RESET 0x545352   // RST
+#define  EXCP_TYPE_UNDEF 0x464455   // UDF
 #define  EXCP_TYPE_PABRT 0x54424150 // PABT
 #define  EXCP_TYPE_DABRT 0x54424144 // DABT
 #define EXCP_LR_ADDR   0x4003FFF4
@@ -307,16 +307,16 @@ static void _show_errors()
 		switch (*excp_type)
 		{
 		case EXCP_TYPE_RESET:
-			WPRINTF("Reset");
+			WPRINTF("RST");
 			break;
 		case EXCP_TYPE_UNDEF:
-			WPRINTF("Undefined instruction");
+			WPRINTF("UNDEF");
 			break;
 		case EXCP_TYPE_PABRT:
-			WPRINTF("Prefetch abort");
+			WPRINTF("PABRT");
 			break;
 		case EXCP_TYPE_DABRT:
-			WPRINTF("Data abort");
+			WPRINTF("DABRT");
 			break;
 		}
 		WPRINTF("\n");
@@ -359,9 +359,11 @@ void nyx_init_load_res()
 	load_saved_configuration();
 
 	FIL fp;
-	f_open(&fp, "NEXT/sys/res.pak", FA_READ);
-	f_read(&fp, (void *)NYX_RES_ADDR, f_size(&fp), NULL);
-	f_close(&fp);
+	if (!f_open(&fp, "bootloader/sys/res.pak", FA_READ))
+	{
+		f_read(&fp, (void *)NYX_RES_ADDR, f_size(&fp), NULL);
+		f_close(&fp);
+}
 
 	// If no custom switch icon exists, load normal.
 	if (f_stat("bootloader/res/icon_switch_custom.bmp", NULL))
