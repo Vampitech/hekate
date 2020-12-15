@@ -96,6 +96,15 @@ static const u8 master_keyseed_4xx_5xx_610[0x10] =
 static const u8 master_keyseed_620[0x10] =
 	{ 0x37, 0x4B, 0x77, 0x29, 0x59, 0xB4, 0x04, 0x30, 0x81, 0xF6, 0xE5, 0x8C, 0x6D, 0x36, 0x17, 0x9A };
 
+static const u8 master_kekseed_t210b01[][0x10] = {
+	{ 0x77, 0x60, 0x5A, 0xD2, 0xEE, 0x6E, 0xF8, 0x3C, 0x3F, 0x72, 0xE2, 0x59, 0x9D, 0xAC, 0x5E, 0x56 }, // 6.0.0.
+	{ 0x1E, 0x80, 0xB8, 0x17, 0x3E, 0xC0, 0x60, 0xAA, 0x11, 0xBE, 0x1A, 0x4A, 0xA6, 0x6F, 0xE4, 0xAE }, // 6.2.0.
+	{ 0x94, 0x08, 0x67, 0xBD, 0x0A, 0x00, 0x38, 0x84, 0x11, 0xD3, 0x1A, 0xDB, 0xDD, 0x8D, 0xF1, 0x8A }, // 7.0.0.
+	{ 0x5C, 0x24, 0xE3, 0xB8, 0xB4, 0xF7, 0x00, 0xC2, 0x3C, 0xFD, 0x0A, 0xCE, 0x13, 0xC3, 0xDC, 0x23 }, // 8.1.0.
+	{ 0x86, 0x69, 0xF0, 0x09, 0x87, 0xC8, 0x05, 0xAE, 0xB5, 0x7B, 0x48, 0x74, 0xDE, 0x62, 0xA6, 0x13 }, // 9.0.0.
+	{ 0x0E, 0x44, 0x0C, 0xED, 0xB4, 0x36, 0xC0, 0x3F, 0xAA, 0x1D, 0xAE, 0xBF, 0x62, 0xB1, 0x09, 0x82 }, // 9.1.0.
+};
+
 static const u8 console_keyseed[0x10] =
 	{ 0x4F, 0x02, 0x5F, 0x0E, 0xB6, 0x6D, 0x11, 0x0E, 0xDC, 0x32, 0x7D, 0x41, 0x86, 0xC2, 0xF4, 0x78 };
 
@@ -208,6 +217,10 @@ bool hos_eks_rw_try(u8 *buf, bool write)
 
 void hos_eks_get()
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	// Check if EKS already found and parsed.
 	if (!h_cfg.eks)
 	{
@@ -222,7 +235,7 @@ void hos_eks_get()
 
 		// Check if valid and for this unit.
 		if (eks->magic == HOS_EKS_MAGIC &&
-			eks->sbk_low == FUSE(FUSE_PRIVATE_KEY0))
+			eks->lot0 == FUSE(FUSE_OPT_LOT_CODE_0))
 		{
 			h_cfg.eks = eks;
 			return;
@@ -235,6 +248,10 @@ out:
 
 void hos_eks_save(u32 kb)
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	if (kb >= KB_FIRMWARE_VERSION_700)
 	{
 		u32 key_idx = 0;
@@ -272,7 +289,7 @@ void hos_eks_save(u32 kb)
 			// Set magic and personalized info.
 			h_cfg.eks->magic = HOS_EKS_MAGIC;
 			h_cfg.eks->enabled[key_idx] = kb;
-			h_cfg.eks->sbk_low = FUSE(FUSE_PRIVATE_KEY0);
+			h_cfg.eks->lot0 = FUSE(FUSE_OPT_LOT_CODE_0);
 
 			// Copy new keys.
 			memcpy(h_cfg.eks->dkg, keys + 10 * 0x10, 0x10);
@@ -309,6 +326,10 @@ out:
 
 void hos_eks_clear(u32 kb)
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	if (h_cfg.eks && kb >= KB_FIRMWARE_VERSION_700)
 	{
 		u32 key_idx = 0;
@@ -345,6 +366,21 @@ out:
 	}
 }
 
+int hos_keygen_t210b01(u32 kb)
+{
+	// Use SBK as Device key 4x unsealer and KEK for mkey in T210B01 units.
+	se_aes_unwrap_key(10, 14, console_keyseed_4xx_5xx);
+
+	// Derive master key.
+	se_aes_unwrap_key(7, 12, &master_kekseed_t210b01[kb - KB_FIRMWARE_VERSION_600]);
+	se_aes_unwrap_key(7, 7, master_keyseed_retail);
+
+	// Derive latest pkg2 key.
+	se_aes_unwrap_key(8, 7, package2_keyseed);
+
+	return 1;
+}
+
 int hos_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt, launch_ctxt_t *hos_ctxt)
 {
 	u8 tmp[0x30];
@@ -352,6 +388,9 @@ int hos_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt, launch_ctxt_t *hos_c
 
 	if (kb > KB_FIRMWARE_VERSION_MAX)
 		return 0;
+
+	if (h_cfg.t210b01)
+		return hos_keygen_t210b01(kb);
 
 	if (kb <= KB_FIRMWARE_VERSION_600)
 		tsec_ctxt->size = 0xF00;
@@ -543,23 +582,42 @@ int hos_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt, launch_ctxt_t *hos_c
 
 static int _read_emmc_pkg1(launch_ctxt_t *ctxt)
 {
+	static const u32 BOOTLOADER_SIZE          = 0x40000;
+	static const u32 BOOTLOADER_MAIN_OFFSET   = 0x100000;
+	static const u32 BOOTLOADER_BACKUP_OFFSET = 0x140000;
+	static const u32 HOS_KEYBLOBS_OFFSET      = 0x180000;
+
+	u32 pk1_offset = h_cfg.t210b01 ? sizeof(bl_hdr_t210b01_t) : 0; // Skip T210B01 OEM header.
+	u32 bootloader_offset = BOOTLOADER_MAIN_OFFSET;
+	ctxt->pkg1 = (void *)malloc(BOOTLOADER_SIZE);
+
+try_load:
 	// Read package1.
-	ctxt->pkg1 = (void *)malloc(0x40000);
 	emummc_storage_set_mmc_partition(&emmc_storage, EMMC_BOOT0);
-	emummc_storage_read(&emmc_storage, 0x100000 / NX_EMMC_BLOCKSIZE, 0x40000 / NX_EMMC_BLOCKSIZE, ctxt->pkg1);
-	ctxt->pkg1_id = pkg1_identify(ctxt->pkg1);
+	emummc_storage_read(&emmc_storage, bootloader_offset / NX_EMMC_BLOCKSIZE, BOOTLOADER_SIZE / NX_EMMC_BLOCKSIZE, ctxt->pkg1);
+
+	ctxt->pkg1_id = pkg1_identify(ctxt->pkg1 + pk1_offset);
 	if (!ctxt->pkg1_id)
 	{
 		_hos_crit_error("Unknown pkg1 version.");
-		EHPRINTFARGS("HOS version not supported!%s",
+		EPRINTFARGS("HOS version not supported!%s",
 			(emu_cfg.enabled && !h_cfg.emummc_force_disable) ? "\nOr emuMMC corrupt!" : "");
+
+		// Try backup bootloader.
+		if (bootloader_offset != BOOTLOADER_BACKUP_OFFSET)
+		{
+			EPRINTF("Trying backup bootloader...");
+			bootloader_offset = BOOTLOADER_BACKUP_OFFSET;
+			goto try_load;
+		}
+
 		return 0;
 	}
 	gfx_printf("Identified pkg1 and mkey %d\n\n", ctxt->pkg1_id->kb);
 
 	// Read the correct keyblob.
 	ctxt->keyblob = (u8 *)calloc(NX_EMMC_BLOCKSIZE, 1);
-	emummc_storage_read(&emmc_storage, 0x180000 / NX_EMMC_BLOCKSIZE + ctxt->pkg1_id->kb, 1, ctxt->keyblob);
+	emummc_storage_read(&emmc_storage, HOS_KEYBLOBS_OFFSET / NX_EMMC_BLOCKSIZE + ctxt->pkg1_id->kb, 1, ctxt->keyblob);
 
 	return 1;
 }
@@ -617,7 +675,6 @@ static void _free_launch_components(launch_ctxt_t *ctxt)
 
 static bool _get_fs_exfat_compatible(link_t *info, bool *fs_is_510)
 {
-	u32 fs_idx;
 	u32 fs_ids_cnt;
 	u32 sha_buf[32 / sizeof(u32)];
 	kip1_id_t *kip_ids;
@@ -632,21 +689,27 @@ static bool _get_fs_exfat_compatible(link_t *info, bool *fs_is_510)
 
 		pkg2_get_ids(&kip_ids, &fs_ids_cnt);
 
-		for (fs_idx = 0; fs_idx < fs_ids_cnt; fs_idx++)
+		for (u32 fs_idx = 0; fs_idx < fs_ids_cnt; fs_idx++)
+		{
 			if (!memcmp(sha_buf, kip_ids[fs_idx].hash, 8))
+			{
+				// Check if it's 5.1.0.
+				if ((fs_idx & ~1) == 16)
+					*fs_is_510 = true;
+
+				// Check if FAT32-only.
+				if (!(fs_idx & 1))
+					return false;
+
+				// FS is FAT32 + exFAT.
 				break;
-
-		// Check if it's 5.1.0.
-		if ((fs_idx & ~1) == 16)
-			*fs_is_510 = true;
-
-		// Return false if FAT32 only.
-		if (fs_ids_cnt <= fs_idx && !(fs_idx & 1))
-			return false;
+			}
+		}
 
 		break;
 	}
 
+	// Hash didn't match or FAT32 + exFAT.
 	return true;
 }
 
@@ -718,16 +781,26 @@ int hos_launch(ini_sec_t *cfg)
 		goto error;
 	}
 
-	// Check if fuses lower than 4.0.0 or 9.0.0 and if yes apply NO Gamecard patch.
-	// Additionally check if running emuMMC and disable GC if v3 fuses are burnt and HOS is <= 8.1.0.
+	// Check if fuses lower than 4.0.0 or 9.0.0 or 11.0.0 and if yes apply NO Gamecard patch.
+	// Additionally check if running emuMMC and disable GC if v3/v4 fuses are burnt and HOS is <= 8.1.0 or != 11.0.0.
+	//TODO: Add better checks for 11.0.0 in case mkey doesn't change.
 	if (!ctxt.stock)
 	{
 		u32 fuses = fuse_read_odm(7);
+		bool is_hos_11000 = !memcmp(ctxt.pkg1_id->id, "20201030110855", 8);
 		if ((h_cfg.autonogc &&
-				((!(fuses & ~0xF) && (kb >= KB_FIRMWARE_VERSION_400)) || // LAFW v2.
-				(!(fuses & ~0x3FF) && (kb >= KB_FIRMWARE_VERSION_900)))) // LAFW v3.
-			|| ((emummc_enabled) &&
-				((fuses & 0x400) && (kb <= KB_FIRMWARE_VERSION_810))))
+			  (
+				(!(fuses &    ~0xF) && (kb >= KB_FIRMWARE_VERSION_400)) || // LAFW v2.
+				(!(fuses &  ~0x3FF) && (kb >= KB_FIRMWARE_VERSION_900)) || // LAFW v3.
+				(!(fuses & ~0x1FFF) && is_hos_11000)                       // LAFW v4.
+			  )
+			)
+		|| ((emummc_enabled) &&
+			  (
+				((fuses & 0x400) && (kb <= KB_FIRMWARE_VERSION_810)) || // HOS  9.0.0 fuses burnt.
+				((fuses & 0x2000) && !is_hos_11000)                     // HOS 11.0.0 fuses burnt.
+			  )
+			))
 			config_kip1patch(&ctxt, "nogc");
 	}
 
@@ -765,12 +838,30 @@ int hos_launch(ini_sec_t *cfg)
 	// Decrypt and unpack package1 if we require parts of it.
 	if (!ctxt.warmboot || !ctxt.secmon)
 	{
-		if (kb <= KB_FIRMWARE_VERSION_600)
-			pkg1_decrypt(ctxt.pkg1_id, ctxt.pkg1);
-
-		if (kb <= KB_FIRMWARE_VERSION_620 && !emummc_enabled)
+		// Decrypt PK1 or PK11.
+		if (kb <= KB_FIRMWARE_VERSION_600 || h_cfg.t210b01)
 		{
-			pkg1_unpack((void *)ctxt.pkg1_id->warmboot_base, (void *)ctxt.pkg1_id->secmon_base, NULL, ctxt.pkg1_id, ctxt.pkg1);
+			if (!pkg1_decrypt(ctxt.pkg1_id, ctxt.pkg1))
+			{
+				_hos_crit_error("Pkg1 decryption failed!");
+				if (h_cfg.t210b01)
+					EPRINTF("Is BEK missing?");
+				goto error;
+			}
+		}
+
+		// Unpack PK11.
+		if (h_cfg.t210b01 || (kb <= KB_FIRMWARE_VERSION_620 && !emummc_enabled))
+		{
+			// Skip T210B01 OEM header.
+			u32 pk1_offset = 0;
+			if (h_cfg.t210b01)
+				pk1_offset = sizeof(bl_hdr_t210b01_t);
+
+			pkg1_unpack((void *)warmboot_base, &ctxt.warmboot_size,
+				!exo_new ? (void *)ctxt.pkg1_id->secmon_base : NULL, NULL,
+				ctxt.pkg1_id, ctxt.pkg1 + pk1_offset);
+
 			gfx_puts("Decrypted & unpacked pkg1\n");
 		}
 		else
@@ -780,10 +871,13 @@ int hos_launch(ini_sec_t *cfg)
 		}
 	}
 
+	// Configure and manage Warmboot binary.
+	pkg1_warmboot_config(&ctxt, kb, warmboot_base);
+
 	// Replace 'warmboot.bin' if requested.
 	if (ctxt.warmboot)
 		memcpy((void *)warmboot_base, ctxt.warmboot, ctxt.warmboot_size);
-	else
+	else if (!h_cfg.t210b01)
 	{
 		// Patch warmboot on T210 to allow downgrading.
 		if (kb >= KB_FIRMWARE_VERSION_700)
@@ -791,27 +885,15 @@ int hos_launch(ini_sec_t *cfg)
 			_hos_crit_error("No warmboot provided!");
 			goto error;
 		}
-		// Else we patch it to allow downgrading.
-		patch_t *warmboot_patchset = ctxt.pkg1_id->warmboot_patchset;
-		gfx_printf("%kPatching Warmboot%k\n", 0xFFFFBA00, 0xFFCCCCCC);
-		for (u32 i = 0; warmboot_patchset[i].off != 0xFFFFFFFF; i++)
-			*(vu32 *)(ctxt.pkg1_id->warmboot_base + warmboot_patchset[i].off) = warmboot_patchset[i].val;
+
+		pkg1_warmboot_patch((void *)&ctxt);
 	}
-	// Set warmboot address in PMC if required.
-	if (kb <= KB_FIRMWARE_VERSION_301)
-		PMC(APBDEV_PMC_SCRATCH1) = warmboot_base;
 
 	// Replace 'SecureMonitor' if requested or patch Pkg2 checks if needed.
 	if (ctxt.secmon)
 		memcpy((void *)secmon_base, ctxt.secmon, ctxt.secmon_size);
-	else if (ctxt.pkg1_id->secmon_patchset)
-	{
-		// Else we patch it to allow for an unsigned package2 and patched kernel.
-		patch_t *secmon_patchset = ctxt.pkg1_id->secmon_patchset;
-		gfx_printf("%kPatching Secure Monitor%k\n", 0xFFFFBA00, 0xFFCCCCCC);
-		for (u32 i = 0; secmon_patchset[i].off != 0xFFFFFFFF; i++)
-			*(vu32 *)(ctxt.pkg1_id->secmon_base + secmon_patchset[i].off) = secmon_patchset[i].val;
-	}
+	else
+		pkg1_secmon_patch((void *)&ctxt, secmon_base, h_cfg.t210b01);
 
 	gfx_puts("Loaded warmboot and secmon\n");
 
@@ -830,13 +912,11 @@ int hos_launch(ini_sec_t *cfg)
 	if (!pkg2_hdr)
 	{
 		_hos_crit_error("Pkg2 decryption failed!");
-		if (kb >= KB_FIRMWARE_VERSION_700)
-		{
-			EPRINTF("Is Sept updated?");
+		EPRINTFARGS("Is hekate%s updated?", kb >= KB_FIRMWARE_VERSION_700 ? " or Sept" : "");
 
-			// Clear EKS slot, in case something went wrong with sept keygen.
+		// Clear EKS slot, in case something went wrong with sept keygen.
+		if (kb >= KB_FIRMWARE_VERSION_700)
 			hos_eks_clear(kb);
-		}
 		goto error;
 	}
 	else if (kb >= KB_FIRMWARE_VERSION_700)
@@ -901,7 +981,6 @@ int hos_launch(ini_sec_t *cfg)
 	}
 
 	// Merge extra KIP1s into loaded ones.
-	gfx_printf("%kPatching kips%k\n", 0xFFFFBA00, 0xFFCCCCCC);
 	LIST_FOREACH_ENTRY(merge_kip_t, mki, &ctxt.kip1_list, link)
 		pkg2_merge_kip(&kip1_info, (pkg2_kip1_t *)mki->kip1);
 
@@ -920,16 +999,20 @@ int hos_launch(ini_sec_t *cfg)
 	}
 
 	// Patch kip1s in memory if needed.
+	gfx_printf("%kPatching kips%k\n", 0xFFFFBA00, 0xFFCCCCCC);
 	const char* unappliedPatch = pkg2_patch_kips(&kip1_info, ctxt.kip1_patches);
 	if (unappliedPatch != NULL)
 	{
 		EHPRINTFARGS("Failed to apply '%s'!", unappliedPatch);
 
-		gfx_puts("\nPress POWER to continue.\nPress VOL to go to the menu.\n");
-		display_backlight_brightness(h_cfg.backlight, 1000);
+		bool emmc_patch_failed = !strcmp(unappliedPatch, "emummc");
+		if (!emmc_patch_failed)
+		{
+			gfx_puts("\nPress POWER to continue.\nPress VOL to go to the menu.\n");
+			display_backlight_brightness(h_cfg.backlight, 1000);
+		}
 
-		u32 btn = btn_wait();
-		if (!(btn & BTN_POWER))
+		if (emmc_patch_failed || !(btn_wait() & BTN_POWER))
 		{
 			_free_launch_components(&ctxt);
 			goto error; // MUST stop here, because if user requests 'nogc' but it's not applied, their GC controller gets updated!
@@ -937,25 +1020,19 @@ int hos_launch(ini_sec_t *cfg)
 	}
 
 	// Rebuild and encrypt package2.
-	pkg2_build_encrypt((void *)PKG2_LOAD_ADDR, ctxt.kernel, ctxt.kernel_size, &kip1_info, ctxt.new_pkg2, kb);
+	pkg2_build_encrypt((void *)PKG2_LOAD_ADDR, &ctxt, &kip1_info);
 
 	gfx_puts("Rebuilt & loaded pkg2\n");
 
 	gfx_printf("\n%kBooting...%k\n", 0xFF96FF00, 0xFFCCCCCC);
 
-	// Clear pkg1/pkg2 keys.
-	se_aes_key_clear(8);
-	se_aes_key_clear(11);
-
 	// Set initial mailbox values.
 	int bootStateDramPkg2 = 0;
 	int bootStatePkg2Continue = 0;
 
-	// Set warmboot PA address ids for 3.0.0 - 3.0.2.
-	if (kb == KB_FIRMWARE_VERSION_300)
-		PMC(APBDEV_PMC_SECURE_SCRATCH32) = 0xE3;  // Warmboot 3.0.0 PA address id.
-	else if (kb == KB_FIRMWARE_VERSION_301)
-		PMC(APBDEV_PMC_SECURE_SCRATCH32) = 0x104; // Warmboot 3.0.1/.2 PA address id.
+	// Clear pkg1/pkg2 keys.
+	se_aes_key_clear(8);
+	se_aes_key_clear(11);
 
 	// Finalize per firmware key access. Skip access control if new exosphere.
 	switch (kb | (exo_new << 7))
@@ -1039,8 +1116,9 @@ int hos_launch(ini_sec_t *cfg)
 	// Clear EMC_SCRATCH0.
 	EMC(EMC_SCRATCH0) = 0;
 
-	// Hold USBD in reset for SoC state validation on sleep.
+	// Hold USBD, USB2, AHBDMA and APBDMA in reset for SoC state validation on sleep.
 	CLOCK(CLK_RST_CONTROLLER_RST_DEV_L_SET) = BIT(CLK_L_USBD);
+	CLOCK(CLK_RST_CONTROLLER_RST_DEV_H_SET) = BIT(CLK_H_AHBDMA) | BIT(CLK_H_APBDMA) | BIT(CLK_H_USB2);
 
 	// Flush cache and disable MMU.
 	bpmp_mmu_disable();

@@ -66,6 +66,15 @@ static const u8 master_keyseed_4xx_5xx_610[0x10] =
 static const u8 master_keyseed_620[0x10] =
 	{ 0x37, 0x4B, 0x77, 0x29, 0x59, 0xB4, 0x04, 0x30, 0x81, 0xF6, 0xE5, 0x8C, 0x6D, 0x36, 0x17, 0x9A };
 
+static const u8 master_kekseed_t210b01[][0x10] = {
+	{ 0x77, 0x60, 0x5A, 0xD2, 0xEE, 0x6E, 0xF8, 0x3C, 0x3F, 0x72, 0xE2, 0x59, 0x9D, 0xAC, 0x5E, 0x56 }, // 6.0.0.
+	{ 0x1E, 0x80, 0xB8, 0x17, 0x3E, 0xC0, 0x60, 0xAA, 0x11, 0xBE, 0x1A, 0x4A, 0xA6, 0x6F, 0xE4, 0xAE }, // 6.2.0.
+	{ 0x94, 0x08, 0x67, 0xBD, 0x0A, 0x00, 0x38, 0x84, 0x11, 0xD3, 0x1A, 0xDB, 0xDD, 0x8D, 0xF1, 0x8A }, // 7.0.0.
+	{ 0x5C, 0x24, 0xE3, 0xB8, 0xB4, 0xF7, 0x00, 0xC2, 0x3C, 0xFD, 0x0A, 0xCE, 0x13, 0xC3, 0xDC, 0x23 }, // 8.1.0.
+	{ 0x86, 0x69, 0xF0, 0x09, 0x87, 0xC8, 0x05, 0xAE, 0xB5, 0x7B, 0x48, 0x74, 0xDE, 0x62, 0xA6, 0x13 }, // 9.0.0.
+	{ 0x0E, 0x44, 0x0C, 0xED, 0xB4, 0x36, 0xC0, 0x3F, 0xAA, 0x1D, 0xAE, 0xBF, 0x62, 0xB1, 0x09, 0x82 }, // 9.1.0.
+};
+
 static const u8 console_keyseed[0x10] =
 	{ 0x4F, 0x02, 0x5F, 0x0E, 0xB6, 0x6D, 0x11, 0x0E, 0xDC, 0x32, 0x7D, 0x41, 0x86, 0xC2, 0xF4, 0x78 };
 
@@ -108,7 +117,7 @@ static const u8 new_console_kekseed[KB_FIRMWARE_VERSION_MAX - KB_FIRMWARE_VERSIO
 	{ 0x86, 0x61, 0xB0, 0x16, 0xFA, 0x7A, 0x9A, 0xEA, 0xF6, 0xF5, 0xBE, 0x1A, 0x13, 0x5B, 0x6D, 0x9E }, // 7.0.0 New Device Keygen Source.
 	{ 0xA6, 0x81, 0x71, 0xE7, 0xB5, 0x23, 0x74, 0xB0, 0x39, 0x8C, 0xB7, 0xFF, 0xA0, 0x62, 0x9F, 0x8D }, // 8.1.0 New Device Keygen Source.
 	{ 0x03, 0xE7, 0xEB, 0x43, 0x1B, 0xCF, 0x5F, 0xB5, 0xED, 0xDC, 0x97, 0xAE, 0x21, 0x8D, 0x19, 0xED }, // 9.0.0 New Device Keygen Source.
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // TODO: 9.1.0 New Device Keygen Source to be added on next change-of-keys.
+	{ 0xCE, 0xFE, 0x41, 0x0F, 0x46, 0x9A, 0x30, 0xD6, 0xF2, 0xE9, 0x0C, 0x6B, 0xB7, 0x15, 0x91, 0x36 }, // 9.1.0 New Device Keygen Source.
 };
 
 static const u8 gen_keyseed[0x10] =
@@ -153,6 +162,10 @@ bool hos_eks_rw_try(u8 *buf, bool write)
 
 void hos_eks_get()
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	// Check if EKS already found and parsed.
 	if (!h_cfg.eks)
 	{
@@ -167,7 +180,7 @@ void hos_eks_get()
 
 		// Check if valid and for this unit.
 		if (eks->magic == HOS_EKS_MAGIC &&
-			eks->sbk_low == FUSE(FUSE_PRIVATE_KEY0))
+			eks->lot0 == FUSE(FUSE_OPT_LOT_CODE_0))
 		{
 			h_cfg.eks = eks;
 			return;
@@ -180,6 +193,10 @@ out:
 
 void hos_eks_save(u32 kb)
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	if (kb >= KB_FIRMWARE_VERSION_700)
 	{
 		u32 key_idx = 0;
@@ -217,7 +234,7 @@ void hos_eks_save(u32 kb)
 			// Set magic and personalized info.
 			h_cfg.eks->magic = HOS_EKS_MAGIC;
 			h_cfg.eks->enabled[key_idx] = kb;
-			h_cfg.eks->sbk_low = FUSE(FUSE_PRIVATE_KEY0);
+			h_cfg.eks->lot0 = FUSE(FUSE_OPT_LOT_CODE_0);
 
 			// Copy new keys.
 			memcpy(h_cfg.eks->dkg, keys + 10 * 0x10, 0x10);
@@ -254,6 +271,10 @@ out:
 
 void hos_eks_clear(u32 kb)
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	if (h_cfg.eks && kb >= KB_FIRMWARE_VERSION_700)
 	{
 		u32 key_idx = 0;
@@ -292,6 +313,10 @@ out:
 
 void hos_eks_bis_save()
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	bool new_eks = false;
 	if (!h_cfg.eks)
 	{
@@ -318,7 +343,7 @@ void hos_eks_bis_save()
 		// Set magic and personalized info.
 		h_cfg.eks->magic = HOS_EKS_MAGIC;
 		h_cfg.eks->enabled_bis = 1;
-		h_cfg.eks->sbk_low = FUSE(FUSE_PRIVATE_KEY0);
+		h_cfg.eks->lot0 = FUSE(FUSE_OPT_LOT_CODE_0);
 
 		// Copy new keys.
 		memcpy(h_cfg.eks->bis_keys[0].crypt, bis_keys + (0 * 0x10), 0x10);
@@ -348,6 +373,10 @@ out:
 
 void hos_eks_bis_clear()
 {
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	// Check if BIS keys are enabled.
 	if (h_cfg.eks && h_cfg.eks->enabled_bis)
 	{
@@ -374,6 +403,21 @@ out:
 	}
 }
 
+int hos_keygen_t210b01(u32 kb)
+{
+	// Use SBK as Device key 4x unsealer and KEK for mkey in T210B01 units.
+	se_aes_unwrap_key(10, 14, console_keyseed_4xx_5xx);
+
+	// Derive master key.
+	se_aes_unwrap_key(7, 12, &master_kekseed_t210b01[kb - KB_FIRMWARE_VERSION_600]);
+	se_aes_unwrap_key(7, 7, master_keyseed_retail);
+
+	// Derive latest pkg2 key.
+	se_aes_unwrap_key(8, 7, package2_keyseed);
+
+	return 1;
+}
+
 int hos_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 {
 	u8 tmp[0x30];
@@ -381,6 +425,9 @@ int hos_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 
 	if (kb > KB_FIRMWARE_VERSION_MAX)
 		return 0;
+
+	if (h_cfg.t210b01)
+		return hos_keygen_t210b01(kb);
 
 	if (kb <= KB_FIRMWARE_VERSION_600)
 		tsec_ctxt->size = 0xF00;
@@ -547,6 +594,19 @@ static void _hos_validate_sept_mkey(u32 kb)
 	hos_eks_clear(kb);
 }
 
+static void _hos_bis_print_key(u32 idx, u8 *key)
+{
+	gfx_printf("BIS %d Crypt: ", idx);
+	for (int i = 0; i < 0x10; i++)
+		gfx_printf("%02X", key[((idx * 2 + 0) * 0x10) + i]);
+	gfx_puts("\n");
+
+	gfx_printf("BIS %d Tweak: ", idx);
+	for (int i = 0; i < 0x10; i++)
+		gfx_printf("%02X", key[((idx * 2 + 1) * 0x10) + i]);
+	gfx_puts("\n");
+}
+
 int hos_bis_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 {
 	u32 keygen_rev = 0;
@@ -559,9 +619,11 @@ int hos_bis_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 	{
 		hos_keygen(keyblob, kb, tsec_ctxt);
 
-		// New keygen was introduced in 4.0.0.
+		// All Mariko use new device keygen. New keygen was introduced in 4.0.0.
 		// We check unconditionally in order to support downgrades.
 		keygen_rev = fuse_read_odm_keygen_rev();
+
+		gfx_printf("Keygen rev: %d\n", keygen_rev);
 
 		if (keygen_rev)
 		{
@@ -571,6 +633,10 @@ int hos_bis_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 
 			// Keygen revision uses bootloader version, which starts from 1.
 			keygen_rev -= (KB_FIRMWARE_VERSION_400 + 1);
+
+			// Use SBK as Device key 4x unsealer and KEK for mkey in T210B01 units.
+			if (h_cfg.t210b01)
+				mkey_slot = 7;
 
 			// Derive mkey 0.
 			do
@@ -620,7 +686,7 @@ int hos_bis_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 		se_aes_crypt_block_ecb(2, 0, bis_keys + (4 * 0x10), bis_keyseed[4]);
 		se_aes_crypt_block_ecb(2, 0, bis_keys + (5 * 0x10), bis_keyseed[5]);
 
-		if (kb >= KB_FIRMWARE_VERSION_700)
+		if (!h_cfg.t210b01 && kb >= KB_FIRMWARE_VERSION_700)
 			_hos_validate_sept_mkey(kb);
 	}
 	else
@@ -634,6 +700,10 @@ int hos_bis_keygen(u8 *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 		memcpy(bis_keys + (4 * 0x10), h_cfg.eks->bis_keys[2].crypt, 0x10);
 		memcpy(bis_keys + (5 * 0x10), h_cfg.eks->bis_keys[2].tweak, 0x10);
 	}
+
+	_hos_bis_print_key(0, bis_keys);
+	_hos_bis_print_key(1, bis_keys);
+	_hos_bis_print_key(2, bis_keys);
 
 	// Clear all AES keyslots.
 	for (u32 i = 0; i < 6; i++)
@@ -658,16 +728,23 @@ void hos_bis_keys_clear()
 	for (u32 i = 0; i < 6; i++)
 		se_aes_key_clear(i);
 
+	// Check if Erista based unit.
+	if (h_cfg.t210b01)
+		return;
+
 	// Set SBK back.
-	u32 sbk[4] = {
+	if (!h_cfg.sbk_set)
+	{
+		u32 sbk[4] = {
 			FUSE(FUSE_PRIVATE_KEY0),
 			FUSE(FUSE_PRIVATE_KEY1),
 			FUSE(FUSE_PRIVATE_KEY2),
 			FUSE(FUSE_PRIVATE_KEY3)
 		};
-	// Set SBK to slot 14.
-	se_aes_key_set(14, sbk, 0x10);
+		// Set SBK to slot 14.
+		se_aes_key_set(14, sbk, 0x10);
 
-	// Lock SBK from being read.
-	se_key_acc_ctrl(14, SE_KEY_TBL_DIS_KEYREAD_FLAG);
+		// Lock SBK from being read.
+		se_key_acc_ctrl(14, SE_KEY_TBL_DIS_KEYREAD_FLAG);
+	}
 }

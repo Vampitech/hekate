@@ -30,6 +30,8 @@
 #define PKG2_NEWKERN_GET_INI1_HEURISTIC 0xD2800015 // Offset of OP + 12 is the INI1 offset.
 #define PKG2_NEWKERN_START 0x800
 
+#define ATM_MESOSPHERE 0x3053534D
+
 extern u32 pkg2_newkern_ini1_val;
 extern u32 pkg2_newkern_ini1_start;
 extern u32 pkg2_newkern_ini1_end;
@@ -155,6 +157,6 @@ const char* pkg2_patch_kips(link_t *info, char* patchNames);
 
 const pkg2_kernel_id_t *pkg2_identify(u8 *hash);
 pkg2_hdr_t *pkg2_decrypt(void *data, u8 kb);
-void pkg2_build_encrypt(void *dst, void *kernel, u32 kernel_size, link_t *kips_info, bool new_pkg2, u8 kb);
+void pkg2_build_encrypt(void *dst, void *hos_ctxt, link_t *kips_info);
 
 #endif

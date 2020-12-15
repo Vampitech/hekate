@@ -32,11 +32,13 @@
 #include <mem/minerva.h>
 #include <mem/sdram.h>
 #include <power/max77620.h>
+#include <soc/clock.h>
 #include <soc/bpmp.h>
 #include <soc/fuse.h>
 #include <soc/gpio.h>
 #include <soc/hw_init.h>
 #include <soc/i2c.h>
+#include <soc/pinmux.h>
 #include <soc/pmc.h>
 #include <soc/t210.h>
 #include <soc/uart.h>
@@ -169,6 +171,14 @@ lv_res_t launch_payload(lv_obj_t *list)
 		{
 			coreboot_addr = (void *)(COREBOOT_END_ADDR - size);
 			buf = coreboot_addr;
+			if (h_cfg.t210b01)
+			{
+				f_close(&fp);
+
+				EPRINTF("T210B01: Coreboot not allowed!");
+
+				goto out;
+			}
 		}
 
 		if (f_read(&fp, buf, size, NULL))
@@ -241,10 +251,8 @@ void load_saved_configuration()
 						h_cfg.autonogc = atoi(kv->val);
 					else if (!strcmp("updater2p", kv->key))
 						h_cfg.updater2p = atoi(kv->val);
-					else if (!strcmp("brand", kv->key))
-						h_cfg.brand = kv->val;
-					else if (!strcmp("tagline", kv->key))
-						h_cfg.tagline = kv->val;
+					else if (!strcmp("bootprotect", kv->key))
+						h_cfg.bootprotect = atoi(kv->val);
 				}
 
 				break;
@@ -272,6 +280,10 @@ void load_saved_configuration()
 						n_cfg.verification = atoi(kv->val);
 					else if (!strcmp("umsemmcrw", kv->key))
 						n_cfg.ums_emmc_rw = atoi(kv->val) == 1;
+					else if (!strcmp("jcdisable", kv->key))
+						n_cfg.jc_disable = atoi(kv->val) == 1;
+					else if (!strcmp("newpowersave", kv->key))
+						n_cfg.new_powersave = atoi(kv->val) == 1;
 				}
 
 				break;
@@ -307,7 +319,7 @@ static void _show_errors()
 		switch (*excp_type)
 		{
 		case EXCP_TYPE_RESET:
-			WPRINTF("RST");
+			WPRINTF("RESET");
 			break;
 		case EXCP_TYPE_UNDEF:
 			WPRINTF("UNDEF");
@@ -345,6 +357,21 @@ void nyx_init_load_res()
 	set_default_configuration();
 	set_nyx_default_configuration();
 
+	// Reset new info if magic not correct.
+	if (nyx_str->info.magic != NYX_NEW_INFO)
+	{
+		nyx_str->info.sd_init = 0;
+		for (u32 i = 0; i < 3; i++)
+			nyx_str->info.sd_errors[i] = 0;
+	}
+
+	// Clear info magic.
+	nyx_str->info.magic = 0;
+
+	// Set display id from previous initialization.
+	display_set_decoded_panel_id(nyx_str->info.disp_id);
+
+	// Initialize gfx console.
 	gfx_init_ctxt((u32 *)LOG_FB_ADDRESS, 1280, 656, 656);
 	gfx_con_init();
 
@@ -381,8 +408,6 @@ void nyx_init_load_res()
 	hekate_bg = bmp_to_lvimg_obj("bootloader/res/background.bmp");
 
 	sd_unmount();
-
-	h_cfg.rcm_patched = fuse_check_patched_rcm();
 }
 
 #if (LV_LOG_PRINTF == 1)
@@ -402,15 +427,22 @@ void ipl_main()
 	// Important: Preserve version header!
 	__asm__ ("" : : "" (ipl_ver));
 
-#if (LV_LOG_PRINTF == 1)
-	gpio_config(GPIO_PORT_G, GPIO_PIN_0, GPIO_MODE_SPIO);
-	gpio_config(GPIO_PORT_D, GPIO_PIN_1, GPIO_MODE_GPIO);
-	pinmux_config_uart(UART_B);
-	clock_enable_uart(UART_B);
-	uart_init(UART_B, 115200);
+#ifdef DEBUG_UART_PORT
+	#if DEBUG_UART_PORT == UART_B
+		gpio_config(GPIO_PORT_G, GPIO_PIN_0, GPIO_MODE_SPIO);
+		gpio_config(GPIO_PORT_D, GPIO_PIN_1, GPIO_MODE_GPIO);
+	#endif
+	#if DEBUG_UART_PORT == UART_C
+		gpio_config(GPIO_PORT_G, GPIO_PIN_0, GPIO_MODE_GPIO);
+		gpio_config(GPIO_PORT_D, GPIO_PIN_1, GPIO_MODE_SPIO);
+	#endif
+	pinmux_config_uart(DEBUG_UART_PORT);
+	clock_enable_uart(DEBUG_UART_PORT);
+	uart_init(DEBUG_UART_PORT, DEBUG_UART_BAUDRATE);
+	uart_invert(DEBUG_UART_PORT, DEBUG_UART_INVERT, UART_INVERT_TXD);
 
-	uart_send(UART_B, (u8 *)"hekate-NYX: Hello!\r\n", 20);
-	uart_wait_idle(UART_B, UART_TX_IDLE);
+	uart_send(DEBUG_UART_PORT, (u8 *)"hekate-NYX: Hello!\r\n", 20);
+	uart_wait_idle(DEBUG_UART_PORT, UART_TX_IDLE);
 #endif
 
 	// Initialize the rest of hw and load nyx's resources.

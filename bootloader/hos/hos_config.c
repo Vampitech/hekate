@@ -253,12 +253,21 @@ static int _config_fss(launch_ctxt_t *ctxt, const char *value)
 	{
 		if (!strcmp("fss0experimental", kv->key))
 		{
-			ctxt->fss0_enable_experimental = *kv->val == '1';
+			ctxt->fss0_experimental = *kv->val == '1';
 			break;
 		}
 	}
 
 	return parse_fss(ctxt, value, NULL);
+}
+
+static int _config_exo_fatal_payload(launch_ctxt_t *ctxt, const char *value)
+{
+	ctxt->exofatal = sd_file_read(value, &ctxt->exofatal_size);
+	if (!ctxt->exofatal)
+		return 0;
+
+	return 1;
 }
 
 typedef struct _cfg_handler_t
@@ -278,6 +287,7 @@ static const cfg_handler_t _config_handlers[] = {
 	{ "stock", _config_stock },
 	{ "atmosphere", _config_atmosphere },
 	{ "fss0", _config_fss },
+	{ "exofatal", _config_exo_fatal_payload},
 	{ "emummcforce", _config_emummc_forced },
 	{ "nouserexceptions", _config_dis_exo_user_exceptions },
 	{ "userpmu", _config_exo_user_pmu_access },

@@ -48,6 +48,7 @@
 #define CLK_RST_CONTROLLER_PLLA_MISC1 0xB8
 #define CLK_RST_CONTROLLER_PLLA_MISC 0xBC
 #define CLK_RST_CONTROLLER_PLLU_BASE 0xC0
+#define CLK_RST_CONTROLLER_PLLU_OUTA 0xC4
 #define CLK_RST_CONTROLLER_PLLU_MISC 0xCC
 #define CLK_RST_CONTROLLER_PLLD_BASE 0xD0
 #define CLK_RST_CONTROLLER_PLLD_MISC1 0xD8
@@ -131,6 +132,7 @@
 #define CLK_RST_CONTROLLER_UTMIP_PLL_CFG2 0x488
 #define CLK_RST_CONTROLLER_PLLE_AUX 0x48C
 #define CLK_RST_CONTROLLER_AUDIO_SYNC_CLK_I2S0 0x4A0
+#define CLK_RST_CONTROLLER_UTMIP_PLL_CFG3 0x4C0
 #define CLK_RST_CONTROLLER_PLLX_MISC_3 0x518
 #define CLK_RST_CONTROLLER_UTMIPLL_HW_PWRDN_CFG0 0x52C
 #define CLK_RST_CONTROLLER_LVL2_CLK_GATE_OVRE 0x554
@@ -140,6 +142,9 @@
 #define CLK_RST_CONTROLLER_PLLC_MISC_2 0x5D0
 #define CLK_RST_CONTROLLER_PLLC4_OUT 0x5E4
 #define CLK_RST_CONTROLLER_PLLMB_BASE 0x5E8
+#define CLK_RST_CONTROLLER_CLK_SOURCE_XUSB_FS 0x608
+#define CLK_RST_CONTROLLER_CLK_SOURCE_XUSB_CORE_DEV 0x60C
+#define CLK_RST_CONTROLLER_CLK_SOURCE_XUSB_SS 0x610
 #define CLK_RST_CONTROLLER_CLK_SOURCE_DSIA_LP 0x620
 #define CLK_RST_CONTROLLER_CLK_SOURCE_I2C6 0x65C
 #define CLK_RST_CONTROLLER_CLK_SOURCE_EMC_DLL 0x664
@@ -153,23 +158,25 @@
 #define CLK_NO_SOURCE 0x0
 
 /*! PLL control and status bits */
-#define PLLCX_BASE_ENABLE    (1 << 30)
-#define PLLCX_BASE_REF_DIS   (1 << 29)
-#define PLLCX_BASE_LOCK      (1 << 27)
+#define PLLCX_BASE_LOCK      BIT(27)
+#define PLLCX_BASE_REF_DIS   BIT(29)
+#define PLLCX_BASE_ENABLE    BIT(30)
 
-#define PLLA_BASE_IDDQ       (1 << 25)
-#define PLLA_OUT0_CLKEN      (1 << 1)
-#define PLLA_OUT0_RSTN_CLR   (1 << 0)
+#define PLLA_OUT0_RSTN_CLR   BIT(0)
+#define PLLA_OUT0_CLKEN      BIT(1)
+#define PLLA_BASE_IDDQ       BIT(25)
 
-#define PLLC_MISC_RESET      (1 << 30)
-#define PLLC_MISC1_IDDQ      (1 << 27)
-#define PLLC_OUT1_CLKEN      (1 << 1)
-#define PLLC_OUT1_RSTN_CLR   (1 << 0)
+#define PLLC_OUT1_RSTN_CLR   BIT(0)
+#define PLLC_OUT1_CLKEN      BIT(1)
+#define PLLC_MISC1_IDDQ      BIT(27)
+#define PLLC_MISC_RESET      BIT(30)
 
-#define PLLC4_MISC_EN_LCKDET (1 << 30)
-#define PLLC4_BASE_IDDQ      (1 << 18)
-#define PLLC4_OUT3_CLKEN     (1 << 1)
-#define PLLC4_OUT3_RSTN_CLR  (1 << 0)
+#define PLLC4_OUT3_RSTN_CLR  BIT(0)
+#define PLLC4_OUT3_CLKEN     BIT(1)
+#define PLLC4_BASE_IDDQ      BIT(18)
+#define PLLC4_MISC_EN_LCKDET BIT(30)
+
+#define UTMIPLL_LOCK         BIT(31)
 
 /*
  * CLOCK Peripherals:
@@ -478,6 +485,9 @@ void clock_enable_pwm();
 void clock_disable_pwm();
 void clock_enable_pllc(u32 divn);
 void clock_disable_pllc();
+void clock_enable_pllu();
+void clock_disable_pllu();
+void clock_enable_utmipll();
 void clock_sdmmc_config_clock_source(u32 *pclock, u32 id, u32 val);
 void clock_sdmmc_get_card_clock_div(u32 *pclock, u16 *pdivisor, u32 type);
 int  clock_sdmmc_is_not_reset_and_enabled(u32 id);

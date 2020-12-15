@@ -56,7 +56,15 @@ extern volatile nyx_storage_t *nyx_str;
  * PCLK    - 68MHz  init (-> 136MHz -> OC/4).
  */
 
-void _config_oscillators()
+u32 hw_get_chip_id()
+{
+	if (((APB_MISC(APB_MISC_GP_HIDREV) >> 4) & 0xF) >= GP_HIDREV_MAJOR_T210B01)
+		return GP_HIDREV_MAJOR_T210B01;
+	else
+		return GP_HIDREV_MAJOR_T210;
+}
+
+static void _config_oscillators()
 {
 	CLOCK(CLK_RST_CONTROLLER_SPARE_REG0) = (CLOCK(CLK_RST_CONTROLLER_SPARE_REG0) & 0xFFFFFFF3) | 4; // Set CLK_M_DIVISOR to 2.
 	SYSCTR0(SYSCTR0_CNTFID0) = 19200000;             // Set counter frequency.
@@ -79,32 +87,38 @@ void _config_oscillators()
 	CLOCK(CLK_RST_CONTROLLER_CLK_SYSTEM_RATE) = 2;             // Set HCLK div to 1 and PCLK div to 3.
 }
 
-void _config_gpios()
+static void _config_gpios(bool nx_hoag)
 {
 	// Clamp inputs when tristated.
 	APB_MISC(APB_MISC_PP_PINMUX_GLOBAL) = 0;
 
-	PINMUX_AUX(PINMUX_AUX_UART2_TX) = 0;
-	PINMUX_AUX(PINMUX_AUX_UART3_TX) = 0;
+	if (!nx_hoag)
+	{
+		PINMUX_AUX(PINMUX_AUX_UART2_TX) = 0;
+		PINMUX_AUX(PINMUX_AUX_UART3_TX) = 0;
+
+		// Set pin mode for UARTB/C TX pins.
+#if !defined (DEBUG_UART_PORT) || DEBUG_UART_PORT != UART_B
+		gpio_config(GPIO_PORT_G, GPIO_PIN_0, GPIO_MODE_GPIO);
+#endif
+#if !defined (DEBUG_UART_PORT) || DEBUG_UART_PORT != UART_C
+		gpio_config(GPIO_PORT_D, GPIO_PIN_1, GPIO_MODE_GPIO);
+#endif
+
+		// Enable input logic for UARTB/C TX pins.
+		gpio_output_enable(GPIO_PORT_G, GPIO_PIN_0, GPIO_OUTPUT_DISABLE);
+		gpio_output_enable(GPIO_PORT_D, GPIO_PIN_1, GPIO_OUTPUT_DISABLE);
+	}
 
 	// Set Joy-Con IsAttached direction.
 	PINMUX_AUX(PINMUX_AUX_GPIO_PE6) = PINMUX_INPUT_ENABLE | PINMUX_TRISTATE;
 	PINMUX_AUX(PINMUX_AUX_GPIO_PH6) = PINMUX_INPUT_ENABLE | PINMUX_TRISTATE;
 
-	// Set pin mode for Joy-Con IsAttached and UARTB/C TX pins.
-#if !defined (DEBUG_UART_PORT) || DEBUG_UART_PORT != UART_B
-	gpio_config(GPIO_PORT_G, GPIO_PIN_0, GPIO_MODE_GPIO);
-#endif
-#if !defined (DEBUG_UART_PORT) || DEBUG_UART_PORT != UART_C
-	gpio_config(GPIO_PORT_D, GPIO_PIN_1, GPIO_MODE_GPIO);
-#endif
 	// Set Joy-Con IsAttached mode.
 	gpio_config(GPIO_PORT_E, GPIO_PIN_6, GPIO_MODE_GPIO);
 	gpio_config(GPIO_PORT_H, GPIO_PIN_6, GPIO_MODE_GPIO);
 
-	// Enable input logic for Joy-Con IsAttached and UARTB/C TX pins.
-	gpio_output_enable(GPIO_PORT_G, GPIO_PIN_0, GPIO_OUTPUT_DISABLE);
-	gpio_output_enable(GPIO_PORT_D, GPIO_PIN_1, GPIO_OUTPUT_DISABLE);
+	// Enable input logic for Joy-Con IsAttached pins.
 	gpio_output_enable(GPIO_PORT_E, GPIO_PIN_6, GPIO_OUTPUT_DISABLE);
 	gpio_output_enable(GPIO_PORT_H, GPIO_PIN_6, GPIO_OUTPUT_DISABLE);
 
@@ -123,14 +137,14 @@ void _config_gpios()
 	// gpio_config(GPIO_PORT_Y, GPIO_PIN_1, GPIO_MODE_GPIO);
 }
 
-void _config_pmc_scratch()
+static void _config_pmc_scratch()
 {
 	PMC(APBDEV_PMC_SCRATCH20)  &= 0xFFF3FFFF; // Unset Debug console from Customer Option.
 	PMC(APBDEV_PMC_SCRATCH190) &= 0xFFFFFFFE; // Unset DATA_DQ_E_IVREF EMC_PMACRO_DATA_PAD_TX_CTRL
 	PMC(APBDEV_PMC_SECURE_SCRATCH21) |= PMC_FUSE_PRIVATEKEYDISABLE_TZ_STICKY_BIT;
 }
 
-void _mbist_workaround()
+static void _mbist_workaround()
 {
 	// Make sure Audio clocks are enabled before accessing I2S.
 	CLOCK(CLK_RST_CONTROLLER_CLK_OUT_ENB_V) |= BIT(CLK_V_AHUB);
@@ -232,13 +246,14 @@ void _mbist_workaround()
 	CLOCK(CLK_RST_CONTROLLER_CLK_SOURCE_NVENC)  = (CLOCK(CLK_RST_CONTROLLER_CLK_SOURCE_NVENC) & 0x1FFFFFFF) | 0x80000000;  // Set clock source to PLLP_OUT.
 }
 
-void _config_se_brom()
+static void _config_se_brom()
 {
 	// Enable fuse clock.
 	clock_enable_fuse(true);
 
 	// Skip SBK/SSK if sept was run.
-	if (!(b_cfg.boot_cfg & BOOT_CFG_SEPT_RUN))
+	bool sbk_skip = b_cfg.boot_cfg & BOOT_CFG_SEPT_RUN || FUSE(FUSE_PRIVATE_KEY0) == 0xFFFFFFFF;
+	if (!sbk_skip)
 	{
 		// Bootrom part we skipped.
 		u32 sbk[4] = {
@@ -268,60 +283,70 @@ void _config_se_brom()
 	APB_MISC(APB_MISC_PP_STRAPPING_OPT_A) = (APB_MISC(APB_MISC_PP_STRAPPING_OPT_A) & 0xF0) | (7 << 10);
 }
 
-void _config_regulators()
+static void _config_regulators(bool tegra_t210)
 {
+	// Set RTC/AO domain to POR voltage.
+	if (tegra_t210)
+		max77620_regulator_set_voltage(REGULATOR_LDO4, 1000000);
+
 	// Disable low battery shutdown monitor.
 	max77620_low_battery_monitor_config(false);
 
 	// Disable SDMMC1 IO power.
-	gpio_output_enable(GPIO_PORT_E, GPIO_PIN_4, GPIO_OUTPUT_DISABLE);
+	gpio_write(GPIO_PORT_E, GPIO_PIN_4, GPIO_LOW);
 	max77620_regulator_enable(REGULATOR_LDO2, 0);
 	sd_power_cycle_time_start = get_tmr_ms();
 
 	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_CNFGBBC, MAX77620_CNFGBBC_RESISTOR_1K);
 	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_ONOFFCNFG1,
-		(1 << 6) | (3 << MAX77620_ONOFFCNFG1_MRT_SHIFT)); // PWR delay for forced shutdown off.
+		BIT(6) | (3 << MAX77620_ONOFFCNFG1_MRT_SHIFT)); // PWR delay for forced shutdown off.
 
-	// Configure all Flexible Power Sequencers.
-	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_CFG0,
-		(7 << MAX77620_FPS_TIME_PERIOD_SHIFT));
-	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_CFG1,
-		(7 << MAX77620_FPS_TIME_PERIOD_SHIFT) | (1 << MAX77620_FPS_EN_SRC_SHIFT));
-	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_CFG2,
-		(7 << MAX77620_FPS_TIME_PERIOD_SHIFT));
-	max77620_regulator_config_fps(REGULATOR_LDO4);
-	max77620_regulator_config_fps(REGULATOR_LDO8);
-	max77620_regulator_config_fps(REGULATOR_SD0);
-	max77620_regulator_config_fps(REGULATOR_SD1);
-	max77620_regulator_config_fps(REGULATOR_SD3);
+	if (tegra_t210)
+	{
+		// Configure all Flexible Power Sequencers for MAX77620.
+		i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_CFG0, (7 << MAX77620_FPS_TIME_PERIOD_SHIFT));
+		i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_CFG1, (7 << MAX77620_FPS_TIME_PERIOD_SHIFT) | (1 << MAX77620_FPS_EN_SRC_SHIFT));
+		i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_CFG2, (7 << MAX77620_FPS_TIME_PERIOD_SHIFT));
+		max77620_regulator_config_fps(REGULATOR_LDO4);
+		max77620_regulator_config_fps(REGULATOR_LDO8);
+		max77620_regulator_config_fps(REGULATOR_SD0);
+		max77620_regulator_config_fps(REGULATOR_SD1);
+		max77620_regulator_config_fps(REGULATOR_SD3);
 
-	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_GPIO3,
-		(4 << MAX77620_FPS_TIME_PERIOD_SHIFT) | (2 << MAX77620_FPS_PD_PERIOD_SHIFT)); // 3.x+
+		i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_FPS_GPIO3,
+			(4 << MAX77620_FPS_TIME_PERIOD_SHIFT) | (2 << MAX77620_FPS_PD_PERIOD_SHIFT)); // 3.x+
 
-	// Set vdd_core voltage to 1.125V.
-	max77620_regulator_set_voltage(REGULATOR_SD0, 1125000);
+		// Set vdd_core voltage to 1.125V.
+		max77620_regulator_set_voltage(REGULATOR_SD0, 1125000);
 
-	// Fix CPU/GPU after a L4T warmboot.
-	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_GPIO5, 2);
-	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_GPIO6, 2);
+		// Fix CPU/GPU after a L4T warmboot.
+		i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_GPIO5, 2);
+		i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_GPIO6, 2);
 
-	i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_VOUT_REG, MAX77621_VOUT_0_95V); // Disable power.
-	i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_VOUT_DVS_REG, MAX77621_VOUT_ENABLE | MAX77621_VOUT_1_09V); // Enable DVS power.
-	i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_CONTROL1_REG, MAX77621_RAMP_50mV_PER_US);
-	i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_CONTROL2_REG,
-		MAX77621_T_JUNCTION_120 | MAX77621_FT_ENABLE | MAX77621_CKKADV_TRIP_75mV_PER_US_HIST_DIS |
-		MAX77621_CKKADV_TRIP_150mV_PER_US | MAX77621_INDUCTOR_NOMINAL);
+		i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_VOUT_REG,     MAX77621_VOUT_0_95V); // Disable power.
+		i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_VOUT_DVS_REG, MAX77621_VOUT_ENABLE | MAX77621_VOUT_1_09V); // Enable DVS power.
+		i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_CONTROL1_REG, MAX77621_RAMP_50mV_PER_US);
+		i2c_send_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_CONTROL2_REG,
+			MAX77621_T_JUNCTION_120 | MAX77621_FT_ENABLE | MAX77621_CKKADV_TRIP_75mV_PER_US_HIST_DIS |
+			MAX77621_CKKADV_TRIP_150mV_PER_US | MAX77621_INDUCTOR_NOMINAL);
 
-	i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_VOUT_REG, MAX77621_VOUT_0_95V); // Disable power.
-	i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_VOUT_DVS_REG, MAX77621_VOUT_ENABLE | MAX77621_VOUT_1_09V); // Enable DVS power.
-	i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_CONTROL1_REG, MAX77621_RAMP_50mV_PER_US);
-	i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_CONTROL2_REG,
-		MAX77621_T_JUNCTION_120 | MAX77621_FT_ENABLE | MAX77621_CKKADV_TRIP_75mV_PER_US_HIST_DIS |
-		MAX77621_CKKADV_TRIP_150mV_PER_US | MAX77621_INDUCTOR_NOMINAL);
+		i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_VOUT_REG,     MAX77621_VOUT_0_95V); // Disable power.
+		i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_VOUT_DVS_REG, MAX77621_VOUT_ENABLE | MAX77621_VOUT_1_09V); // Enable DVS power.
+		i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_CONTROL1_REG, MAX77621_RAMP_50mV_PER_US);
+		i2c_send_byte(I2C_5, MAX77621_GPU_I2C_ADDR, MAX77621_CONTROL2_REG,
+			MAX77621_T_JUNCTION_120 | MAX77621_FT_ENABLE | MAX77621_CKKADV_TRIP_75mV_PER_US_HIST_DIS |
+			MAX77621_CKKADV_TRIP_150mV_PER_US | MAX77621_INDUCTOR_NOMINAL);
+	}
+	else // Tegra X1+ set vdd_core voltage to 1.05V.
+		max77620_regulator_set_voltage(REGULATOR_SD0, 1050000);
 }
 
 void hw_init()
 {
+	// Get Chip ID.
+	bool tegra_t210 = hw_get_chip_id() == GP_HIDREV_MAJOR_T210;
+	bool nx_hoag = fuse_read_hw_type() == FUSE_NX_HW_TYPE_HOAG;
+
 	// Bootrom stuff we skipped by going through rcm.
 	_config_se_brom();
 	//FUSE(FUSE_PRIVATEKEYDISABLE) = 0x11;
@@ -329,7 +354,8 @@ void hw_init()
 	PMC(APBDEV_PMC_SCRATCH49) = PMC(APBDEV_PMC_SCRATCH49) & 0xFFFFFFFC;
 
 	// Perform Memory Built-In Self Test WAR if T210.
-	_mbist_workaround();
+	if (tegra_t210)
+		_mbist_workaround();
 
 	// Enable Security Engine clock.
 	clock_enable_se();
@@ -347,11 +373,12 @@ void hw_init()
 	_config_oscillators();
 
 	// Initialize pin configuration.
-	_config_gpios();
+	_config_gpios(nx_hoag);
 
 #ifdef DEBUG_UART_PORT
 	clock_enable_uart(DEBUG_UART_PORT);
-	uart_init(DEBUG_UART_PORT, 115200);
+	uart_init(DEBUG_UART_PORT, DEBUG_UART_BAUDRATE);
+	uart_invert(DEBUG_UART_PORT, DEBUG_UART_INVERT, UART_INVERT_TXD);
 #endif
 
 	// Enable Dynamic Voltage and Frequency Scaling device clock.
@@ -364,29 +391,39 @@ void hw_init()
 	// Enable clock to TZRAM.
 	clock_enable_tzram();
 
-	// Initialize I2C5, mandatory for PMIC comms.
-	i2c_init(I2C_1);
+	// Initialize I2C5, mandatory for PMIC.
 	i2c_init(I2C_5);
+
+	//! TODO: Why? Device is NFC MCU on Lite.
+	if (nx_hoag)
+		max77620_regulator_set_volt_and_flags(REGULATOR_LDO8, 2800000, MAX77620_POWER_MODE_NORMAL);
+
+	// Initialize I2C1 for various power related devices.
+	i2c_init(I2C_1);
+
+	// Initialize various regulators based on Erista/Mariko platform.
+	_config_regulators(tegra_t210);
 
 	// Enable charger in case it's disabled.
 	bq24193_enable_charger();
-
-	// Initialize various regulators based on Erista/Mariko platform.
-	_config_regulators();
 
 	_config_pmc_scratch(); // Missing from 4.x+
 
 	// Set BPMP/SCLK to PLLP_OUT (408MHz).
 	CLOCK(CLK_RST_CONTROLLER_SCLK_BURST_POLICY) = 0x20003333;
 
+	// Disable TZRAM shutdown control and lock the regs.
+	if (!tegra_t210)
+	{
+		PMC(APBDEV_PMC_TZRAM_PWR_CNTRL) &= 0xFFFFFFFE;
+		PMC(APBDEV_PMC_TZRAM_NON_SEC_DISABLE) = 3;
+		PMC(APBDEV_PMC_TZRAM_SEC_DISABLE) = 3;
+	}
 
 	// Initialize External memory controller and configure DRAM parameters.
 	sdram_init();
 
 	bpmp_mmu_enable();
-
-	// L4T: Clear flags from PMC_SCRATCH0.
-	PMC(APBDEV_PMC_SCRATCH0) &= ~PMC_SCRATCH0_MODE_PAYLOAD;
 }
 
 void hw_reinit_workaround(bool extra_reconfig, u32 magic)

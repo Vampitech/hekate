@@ -233,6 +233,15 @@ int launch_payload(char *path, bool update)
 		{
 			coreboot_addr = (void *)(COREBOOT_END_ADDR - size);
 			buf = coreboot_addr;
+			if (h_cfg.t210b01)
+			{
+				f_close(&fp);
+
+				gfx_con.mute = 0;
+				EPRINTF("T210B01: Coreboot not allowed!");
+
+				goto out;
+			}
 		}
 
 		if (f_read(&fp, buf, size, NULL))
@@ -295,6 +304,15 @@ void auto_launch_update()
 	{
 		if (!f_stat("NEXT/sys/update.bin", NULL))
 			launch_payload("NEXT/sys/update.bin", true);
+		// Check if update.bin exists and is newer and launch it. Otherwise create it.
+		if (!f_stat("bootloader/update.bin", NULL))
+			launch_payload("bootloader/update.bin", true);
+		else
+		{
+			u8 *buf = calloc(0x200, 1);
+			is_ipl_updated(buf, "bootloader/update.bin", true);
+			free(buf);
+		}
 	}
 }
 
@@ -673,9 +691,7 @@ void nyx_load_run()
 
 	sd_end();
 
-	u32 expected_nyx_ver = ((NYX_VER_MJ + '0') << 24) | ((NYX_VER_MN + '0') << 16) | ((NYX_VER_HF + '0') << 8);
-	u32 nyx_ver = byte_swap_32(*(u32 *)(nyx + NYX_VER_OFF));
-
+	// Show loading logo.
 	gfx_clear_grey(0x1B);
 	u8 *BOOTLOGO = (void *)malloc(0x4000);
 	blz_uncompress_srcdest(BOOTLOGO_BLZ, SZ_BOOTLOGO_BLZ, BOOTLOGO, SZ_BOOTLOGO);
@@ -684,6 +700,8 @@ void nyx_load_run()
 	display_backlight_brightness(h_cfg.backlight, 1000);
 
 	// Check if Nyx version is old.
+	u32 expected_nyx_ver = ((NYX_VER_MJ + '0') << 24) | ((NYX_VER_MN + '0') << 16) | ((NYX_VER_HF + '0') << 8);
+	u32 nyx_ver = byte_swap_32(*(u32 *)(nyx + NYX_VER_OFF));
 	if (nyx_ver < expected_nyx_ver)
 	{
 		h_cfg.errors |= ERR_SYSOLD_NYX;
@@ -697,7 +715,10 @@ void nyx_load_run()
 		btn_wait();
 	}
 
+	// Set hekate errors.
 	nyx_str->info.errors = h_cfg.errors;
+
+	// Set Nyx mode.
 	nyx_str->cfg = 0;
 	if (b_cfg.extra_cfg)
 	{
@@ -719,7 +740,15 @@ void nyx_load_run()
 		}
 	}
 
+	// Set hekate version used to boot Nyx.
 	nyx_str->version = ipl_ver.version - 0x303030; // Convert ASCII to numbers.
+
+	// Set SD card initialization info.
+	nyx_str->info.magic = NYX_NEW_INFO;
+	nyx_str->info.sd_init = sd_get_mode();
+	u16 *sd_errors = sd_get_error_count();
+	for (u32 i = 0; i < 3; i++)
+		nyx_str->info.sd_errors[i] = sd_errors[i];
 
 	//memcpy((u8 *)nyx_str->irama, (void *)IRAM_BASE, 0x8000);
 	volatile reloc_meta_t *reloc = (reloc_meta_t *)(IPL_LOAD_ADDR + RELOC_META_OFF);
@@ -767,6 +796,18 @@ static ini_sec_t *get_ini_sec_from_id(ini_sec_t *ini_sec, char **bootlogoCustomE
 	return cfg_sec;
 }
 
+static void _bootloader_corruption_protect()
+{
+	FILINFO fno;
+	if (!f_stat("bootloader", &fno))
+	{
+		if (!h_cfg.bootprotect && (fno.fattrib & AM_ARC))
+			f_chmod("bootloader", 0, AM_ARC);
+		else if (h_cfg.bootprotect && !(fno.fattrib & AM_ARC))
+			f_chmod("bootloader", AM_ARC, AM_ARC);
+	}
+}
+
 static void _auto_launch_firmware()
 {
 	if(b_cfg.extra_cfg & (EXTRA_CFG_NYX_DUMP | EXTRA_CFG_NYX_BIS))
@@ -775,8 +816,6 @@ static void _auto_launch_firmware()
 			EMC(EMC_SCRATCH0) |= EMC_HEKA_UPD;
 		check_sept(NULL);
 	}
-	else if (b_cfg.extra_cfg & EXTRA_CFG_NYX_UMS)
-		EMC(EMC_SCRATCH0) |= EMC_HEKA_UPD;
 
 	if (!h_cfg.sept_run)
 		auto_launch_update();
@@ -845,16 +884,8 @@ static void _auto_launch_firmware()
 								h_cfg.autonogc = atoi(kv->val);
 							else if (!strcmp("updater2p", kv->key))
 								h_cfg.updater2p = atoi(kv->val);
-							else if (!strcmp("brand", kv->key))
-							{
-								h_cfg.brand = malloc(strlen(kv->val) + 1);
-								strcpy(h_cfg.brand, kv->val);
-							}
-							else if (!strcmp("tagline", kv->key))
-							{
-								h_cfg.tagline = malloc(strlen(kv->val) + 1);
-								strcpy(h_cfg.tagline, kv->val);
-							}
+							else if (!strcmp("bootprotect", kv->key))
+								h_cfg.bootprotect = atoi(kv->val);
 						}
 						boot_entry_id++;
 
@@ -869,6 +900,9 @@ static void _auto_launch_firmware()
 							b_cfg.autoboot = h_cfg.autoboot;
 							b_cfg.autoboot_list = h_cfg.autoboot_list;
 						}
+
+						// Apply bootloader protection against corruption.
+						_bootloader_corruption_protect();
 
 						continue;
 					}
@@ -1080,9 +1114,10 @@ out:
 	b_cfg.boot_cfg &= BOOT_CFG_SEPT_RUN;
 	h_cfg.emummc_force_disable = false;
 
-	nyx_load_run();
+	// L4T: Clear custom boot mode flags from PMC_SCRATCH0.
+	PMC(APBDEV_PMC_SCRATCH0) &= ~PMC_SCRATCH0_MODE_CUSTOM_ALL;
 
-	sd_end();
+	nyx_load_run();
 }
 
 static void _patched_rcm_protection()
@@ -1090,40 +1125,42 @@ static void _patched_rcm_protection()
 	sdmmc_storage_t storage;
 	sdmmc_t sdmmc;
 
-	u32 chip_id = (APB_MISC(APB_MISC_GP_HIDREV) >> 4) & 0xF;
-
-	if (!h_cfg.rcm_patched || chip_id != GP_HIDREV_MAJOR_T210)
+	if (!h_cfg.rcm_patched || hw_get_chip_id() == GP_HIDREV_MAJOR_T210B01)
 		return;
 
 	// Check if AutoRCM is enabled and protect from a permanent brick.
 	if (!sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400))
 		return;
 
-	u8 *tempbuf = (u8 *)malloc(0x200);
+	u8 *buf = (u8 *)malloc(0x200);
 	sdmmc_storage_set_mmc_partition(&storage, EMMC_BOOT0);
 
+	u32 sector;
 	u8 corr_mod_byte0;
-	int i, sect = 0;
 	if ((fuse_read_odm(4) & 3) != 3)
 		corr_mod_byte0 = 0xF7;
 	else
 		corr_mod_byte0 = 0x37;
 
-	for (i = 0; i < 4; i++)
+	for (u32 i = 0; i < 4; i++)
 	{
-		sect = (0x200 + (0x4000 * i)) / NX_EMMC_BLOCKSIZE;
-		sdmmc_storage_read(&storage, sect, 1, tempbuf);
+		sector = 1 + (32 * i); // 0x4000 bct + 0x200 offset.
+		sdmmc_storage_read(&storage, sector, 1, buf);
+
+		// Check if 2nd byte of modulus is correct.
+		if (buf[0x11] != 0x86)
+			continue;
 
 		// If AutoRCM is enabled, disable it.
-		if (tempbuf[0x10] != corr_mod_byte0)
+		if (buf[0x10] != corr_mod_byte0)
 		{
-			tempbuf[0x10] = corr_mod_byte0;
+			buf[0x10] = corr_mod_byte0;
 
-			sdmmc_storage_write(&storage, sect, 1, tempbuf);
+			sdmmc_storage_write(&storage, sector, 1, buf);
 		}
 	}
 
-	free(tempbuf);
+	free(buf);
 	sdmmc_storage_end(&storage);
 }
 
@@ -1143,7 +1180,7 @@ static void _show_errors()
 	u32 *excp_lr = (u32 *)EXCP_LR_ADDR;
 
 	if (*excp_enabled == EXCP_MAGIC)
-		h_cfg.errors |= ERR_EXCEPT_ENB;
+		h_cfg.errors |= ERR_EXCEPTION;
 
 	//! FIXME: Find a better way to identify if that scratch has proper data.
 	if (0 && PMC(APBDEV_PMC_SCRATCH37) & PMC_SCRATCH37_KERNEL_PANIC_FLAG)
@@ -1159,23 +1196,24 @@ static void _show_errors()
 		gfx_con_setpos(0, 0);
 		display_backlight_brightness(150, 1000);
 
+		if (h_cfg.errors & ERR_SD_BOOT_EN)
+			WPRINTF("Failed to mount SD!\n");
+
 		if (h_cfg.errors & ERR_LIBSYS_LP0)
 			WPRINTF("Missing LP0 (sleep mode) lib!\n");
 		if (h_cfg.errors & ERR_LIBSYS_MTC)
 			WPRINTF("Missing or old Minerva lib!\n");
 
-		if (h_cfg.errors & ~(ERR_EXCEPT_ENB | ERR_L4T_KERNEL))
-		{
+		if (h_cfg.errors & (ERR_LIBSYS_LP0 | ERR_LIBSYS_MTC))
 			WPRINTF("\nUpdate bootloader folder!\n\n");
-		}
 
-		if (h_cfg.errors & ERR_EXCEPT_ENB)
+		if (h_cfg.errors & ERR_EXCEPTION)
 		{
 			WPRINTFARGS("An exception occurred (LR %08X):\n", *excp_lr);
 			switch (*excp_type)
 			{
 			case EXCP_TYPE_RESET:
-				WPRINTF("RST");
+				WPRINTF("RESET");
 				break;
 			case EXCP_TYPE_UNDEF:
 				WPRINTF("UNDEF");
@@ -1193,7 +1231,7 @@ static void _show_errors()
 			*excp_enabled = 0;
 		}
 
-		if (h_cfg.errors & ERR_L4T_KERNEL)
+		if (0 && h_cfg.errors & ERR_L4T_KERNEL)
 		{
 			WPRINTF("Panic occurred while running L4T.\n");
 			if (!sd_save_to_file((void *)PSTORE_ADDR, PSTORE_SZ, "L4T_panic.bin"))
@@ -1210,7 +1248,7 @@ static void _show_errors()
 static void _check_low_battery()
 {
 	int enough_battery;
-	int batt_volt = 3500;
+	int batt_volt = 0;
 	int charge_status = 0;
 
 	bq24193_get_property(BQ24193_ChargeStatus, &charge_status);
@@ -1218,7 +1256,7 @@ static void _check_low_battery()
 
 	enough_battery = charge_status ? 3250 : 3000;
 
-	if (batt_volt > enough_battery)
+	if (batt_volt > enough_battery || !batt_volt)
 		goto out;
 
 	// Prepare battery icon resources.
@@ -1315,6 +1353,15 @@ static void _check_low_battery()
 out:
 	// Re enable Low Battery Monitor shutdown.
 	max77620_low_battery_monitor_config(true);
+}
+
+void ipl_reload()
+{
+	hw_reinit_workaround(false, 0);
+
+	// Reload hekate.
+	void (*ipl_ptr)() = (void *)IPL_LOAD_ADDR;
+	(*ipl_ptr)();
 }
 
 static void _about()
@@ -1460,6 +1507,7 @@ ment_t ment_top[] = {
 	MDEF_MENU("Tools", &menu_tools),
 	MDEF_MENU("Console info", &menu_cinfo),
 	MDEF_CAPTION("---------------", 0xFF444444),
+	MDEF_HANDLER("Reload", ipl_reload),
 	MDEF_HANDLER("Reboot (Normal)", reboot_normal),
 	MDEF_HANDLER("Reboot (RCM)", reboot_rcm),
 	MDEF_HANDLER("Power off", power_off),
@@ -1468,7 +1516,7 @@ ment_t ment_top[] = {
 	MDEF_END()
 };
 
-menu_t menu_top = { ment_top, "hekate - CTCaer mod v5.3.2", 0, 0 };
+menu_t menu_top = { ment_top, "hekate - CTCaer mod v5.5.1", 0, 0 };
 
 extern void pivot_stack(u32 stack_top);
 
@@ -1494,14 +1542,21 @@ void ipl_main()
 	// Set bootloader's default configuration.
 	set_default_configuration();
 
-	sd_mount();
+	// Mount SD Card.
+	h_cfg.errors |= !sd_mount() ? ERR_SD_BOOT_EN : 0;
 
 	// Save sdram lp0 config.
+<<<<<<< HEAD
 	if (!ianos_loader("NEXT/sys/libsys_lp0.bso", DRAM_LIB, (void *)sdram_get_params_patched()))
+=======
+	void *sdram_params =
+		hw_get_chip_id() == GP_HIDREV_MAJOR_T210 ? sdram_get_params_patched() : sdram_get_params_t210b01();
+	if (!ianos_loader("bootloader/sys/libsys_lp0.bso", DRAM_LIB, sdram_params))
+>>>>>>> 9d79f398972f856f1c10ebe4d943a89be9c1810a
 		h_cfg.errors |= ERR_LIBSYS_LP0;
 
 	// Train DRAM and switch to max frequency.
-	if (minerva_init())
+	if (minerva_init()) //!TODO: Add Tegra210B01 support to minerva.
 		h_cfg.errors |= ERR_LIBSYS_MTC;
 
 	display_init();
@@ -1526,11 +1581,14 @@ void ipl_main()
 	// Load emuMMC configuration from SD.
 	emummc_load_cfg();
 
-	// Show library errors.
+	// Show exception, library errors and L4T kernel panics.
 	_show_errors();
 
 	// Load saved configuration and auto boot if enabled.
 	_auto_launch_firmware();
+
+	// Failed to launch Nyx, unmount SD Card.
+	sd_end();
 
 	minerva_change_freq(FREQ_800);
 

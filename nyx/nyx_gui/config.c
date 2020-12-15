@@ -22,6 +22,7 @@
 #include <gfx_utils.h>
 #include <libs/fatfs/ff.h>
 #include <soc/fuse.h>
+#include <soc/hw_init.h>
 #include <soc/t210.h>
 #include <storage/nx_sd.h>
 #include <storage/sdmmc.h>
@@ -42,14 +43,15 @@ void set_default_configuration()
 	h_cfg.autohosoff = 0;
 	h_cfg.autonogc = 1;
 	h_cfg.updater2p = 0;
-	h_cfg.brand = NULL;
-	h_cfg.tagline = NULL;
+	h_cfg.bootprotect = 0;
 	h_cfg.errors = 0;
 	h_cfg.eks = NULL;
 	h_cfg.sept_run = EMC(EMC_SCRATCH0) & EMC_SEPT_RUN;
 	h_cfg.aes_slots_new = false;
 	h_cfg.rcm_patched = fuse_check_patched_rcm();
+	h_cfg.sbk_set = FUSE(FUSE_PRIVATE_KEY0) == 0xFFFFFFFF;
 	h_cfg.emummc_force_disable = false;
+	h_cfg.t210b01 = hw_get_chip_id() == GP_HIDREV_MAJOR_T210B01;
 
 	sd_power_cycle_time_start = 0;
 }
@@ -61,6 +63,8 @@ void set_nyx_default_configuration()
 	n_cfg.home_screen = 0;
 	n_cfg.verification = 1;
 	n_cfg.ums_emmc_rw = 0;
+	n_cfg.jc_disable = 0;
+	n_cfg.new_powersave = 1;
 }
 
 int create_config_entry()
@@ -118,16 +122,9 @@ int create_config_entry()
 	f_puts("\nupdater2p=", &fp);
 	itoa(h_cfg.updater2p, lbuf, 10);
 	f_puts(lbuf, &fp);
-	if (h_cfg.brand)
-	{
-		f_puts("\nbrand=", &fp);
-		f_puts(h_cfg.brand, &fp);
-	}
-	if (h_cfg.tagline)
-	{
-		f_puts("\ntagline=", &fp);
-		f_puts(h_cfg.tagline, &fp);
-	}
+	f_puts("\nbootprotect=", &fp);
+	itoa(h_cfg.bootprotect, lbuf, 10);
+	f_puts(lbuf, &fp);
 	f_puts("\n", &fp);
 
 	if (mainIniFound)
@@ -205,6 +202,12 @@ int create_nyx_config_entry()
 	f_puts(lbuf, &fp);
 	f_puts("\numsemmcrw=", &fp);
 	itoa(n_cfg.ums_emmc_rw, lbuf, 10);
+	f_puts(lbuf, &fp);
+	f_puts("\njcdisable=", &fp);
+	itoa(n_cfg.jc_disable, lbuf, 10);
+	f_puts(lbuf, &fp);
+	f_puts("\nnewpowersave=", &fp);
+	itoa(n_cfg.new_powersave, lbuf, 10);
 	f_puts(lbuf, &fp);
 	f_puts("\n", &fp);
 

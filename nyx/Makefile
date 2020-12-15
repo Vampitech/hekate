@@ -37,9 +37,9 @@ OBJS += $(addprefix $(BUILDDIR)/$(TARGET)/, \
 	fuse.o kfuse.o \
 	mc.o sdram.o minerva.o ramdisk.o \
 	sdmmc.o sdmmc_driver.o nx_emmc.o nx_emmc_bis.o nx_sd.o \
-	bq24193.o max17050.o max7762x.o max77620-rtc.o regulator_5v.o \
+	bm92t36.o bq24193.o max17050.o max7762x.o max77620-rtc.o regulator_5v.o \
 	touch.o joycon.o tmp451.o fan.o \
-	usbd.o usb_gadget_ums.o usb_gadget_hid.o \
+	usbd.o xusbd.o usb_descriptors.o usb_gadget_ums.o usb_gadget_hid.o \
 	hw_init.o \
 )
 
@@ -80,10 +80,14 @@ CUSTOMDEFINES := -DNYX_LOAD_ADDR=$(NYX_LOAD_ADDR) -DNYX_MAGIC=$(NYX_MAGIC)
 CUSTOMDEFINES += -DNYX_VER_MJ=$(NYXVERSION_MAJOR) -DNYX_VER_MN=$(NYXVERSION_MINOR) -DNYX_VER_HF=$(NYXVERSION_HOTFX) -DNYX_RESERVED=$(NYXVERSION_RSVD)
 CUSTOMDEFINES += -DNYX -DGFX_INC=$(GFX_INC) -DFFCFG_INC=$(FFCFG_INC)
 
-# 0: UART_A, 1: UART_B.
-#CUSTOMDEFINES += -DDEBUG_UART_PORT=1
-
 #CUSTOMDEFINES += -DDEBUG
+
+# UART Logging: Max baudrate 12.5M. Disables Joycon on Nyx if UARTB or UARTC.
+# DEBUG_UART_PORT - 0: UART_A, 1: UART_B, 2: UART_C.
+#CUSTOMDEFINES += -DDEBUG_UART_BAUDRATE=115200 -DDEBUG_UART_INVERT=0 -DDEBUG_UART_PORT=0
+
+# LvGL UART LOG.
+#CUSTOMDEFINES += -DDEBUG_UART_LV_LOG
 
 ARCH := -march=armv4t -mtune=arm7tdmi -mthumb-interwork
 CFLAGS = $(ARCH) -O2 -g -nostdlib -ffunction-sections -fdata-sections -fomit-frame-pointer -std=gnu11 -Wall $(CUSTOMDEFINES)

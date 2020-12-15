@@ -276,7 +276,9 @@ static void _save_fb_to_bmp()
 
 	char path[0x80];
 
-	strcpy(path, "bootloader/screenshots");
+	strcpy(path, "bootloader");
+	f_mkdir(path);
+	strcat(path, "/screenshots");
 	f_mkdir(path);
 
 	// Create date/time name.
@@ -289,18 +291,22 @@ static void _save_fb_to_bmp()
 		max77620_rtc_epoch_to_date(epoch, &time);
 	}
 	s_printf(fname, "%04d%02d%02d_%02d%02d%02d", time.year, time.month, time.day, time.hour, time.min, time.sec);
-
 	s_printf(path + strlen(path), "/nyx%s.bmp", fname);
-	sd_save_to_file(bitmap, file_size, path);
 
-	_save_log_to_bmp(fname);
+	// Save screenshot and log.
+	int res = sd_save_to_file(bitmap, file_size, path);
+	if (!res)
+		_save_log_to_bmp(fname);
 
 	sd_unmount();
 
 	free(bitmap);
 	free(fb);
 
-	lv_mbox_set_text(mbox, SYMBOL_CAMERA"  #96FF00 Screenshot saved!#");
+	if (!res)
+		lv_mbox_set_text(mbox, SYMBOL_CAMERA"  #96FF00 Screenshot saved!#");
+	else
+		lv_mbox_set_text(mbox, SYMBOL_WARNING"  #FFDD00 Screenshot failed!#");
 	manual_system_maintenance(true);
 	lv_mbox_start_auto_close(mbox, 4000);
 
@@ -386,8 +392,6 @@ static bool _fts_touch_read(lv_indev_data_t *data)
 
 static bool _jc_virt_mouse_read(lv_indev_data_t *data)
 {
-	static u32 calib_timer = 0;
-
 	// Poll Joy-Con.
 	jc_gamepad_rpt_t *jc_pad = joycon_poll();
 
@@ -409,12 +413,6 @@ static bool _jc_virt_mouse_read(lv_indev_data_t *data)
 	// Calibrate left stick.
 	if (!jc_drv_ctx.centering_done)
 	{
-		if (!calib_timer)
-			calib_timer = get_tmr_ms() + LV_INDEV_READ_PERIOD * 4;
-
-		if (calib_timer > get_tmr_ms())
-			return false;
-
 		if (jc_pad->conn_l
 			&& jc_pad->lstick_x > 0x400 && jc_pad->lstick_y > 0x400
 			&& jc_pad->lstick_x < 0xC00 && jc_pad->lstick_y < 0xC00)
@@ -435,10 +433,7 @@ static bool _jc_virt_mouse_read(lv_indev_data_t *data)
 
 	// Re-calibrate on disconnection.
 	if (!jc_pad->conn_l)
-	{
-		calib_timer = 0;
 		jc_drv_ctx.centering_done = 0;
-	}
 
 	// Set button presses.
 	if (jc_pad->a || jc_pad->zl || jc_pad->zr)
@@ -905,10 +900,17 @@ static lv_res_t _removed_sd_action(lv_obj_t *btns, const char *txt)
 	switch (btnidx)
 	{
 	case 0:
-		reboot_rcm();
+		if (h_cfg.rcm_patched)
+			reboot_full();
+		else
+			reboot_rcm();
 		break;
 	case 1:
 		power_off();
+		break;
+	case 2:
+		sd_end();
+		do_reload = false;
 		break;
 	}
 
@@ -926,10 +928,10 @@ static void _check_sd_card_removed(void *params)
 		lv_obj_set_style(dark_bg, &mbox_darken);
 		lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
-		static const char * mbox_btn_map[] = { "\221Reboot (RCM)", "\221Power Off", "" };
+		static const char * mbox_btn_map[] = { "\221Reboot (RCM)", "\221Power Off", "\221Do not reload", "" };
 		lv_obj_t *mbox = lv_mbox_create(dark_bg, NULL);
 		lv_mbox_set_recolor_text(mbox, true);
-		lv_obj_set_width(mbox, LV_HOR_RES * 4 / 9);
+		lv_obj_set_width(mbox, LV_HOR_RES * 6 / 9);
 
 		lv_mbox_set_text(mbox, "\n#FF8000 SD card was removed!#\n\n#96FF00 Nyx will reload after inserting it.#\n");
 		lv_mbox_add_btns(mbox, mbox_btn_map, _removed_sd_action);
@@ -952,9 +954,14 @@ static lv_res_t _reboot_action(lv_obj_t *btns, const char *txt)
 	switch (btnidx)
 	{
 	case 0:
-		reboot_normal();
+		if (h_cfg.rcm_patched)
+			reboot_full();
+		else
+			reboot_normal();
 		break;
 	case 1:
+		if (h_cfg.rcm_patched)
+			break;
 		reboot_rcm();
 		break;
 	}
@@ -998,13 +1005,14 @@ static lv_res_t _create_mbox_reboot(lv_obj_t *btn)
 	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
 	static const char * mbox_btn_map[] = { "\221OFW", "\221RCM", "\221Cancel", "" };
+	static const char * mbox_btn_map_patched[] = { "\221Reboot", "\221Cancel", "" };
 	lv_obj_t *mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 	lv_obj_set_width(mbox, LV_HOR_RES / 2);
 
 	lv_mbox_set_text(mbox, "#FF8000 Choose where to reboot:#");
 
-	lv_mbox_add_btns(mbox, mbox_btn_map, _reboot_action);
+	lv_mbox_add_btns(mbox, h_cfg.rcm_patched ? mbox_btn_map_patched : mbox_btn_map, _reboot_action);
 
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_top(mbox, true);
@@ -1378,6 +1386,8 @@ static lv_res_t _win_launch_close_action(lv_obj_t * btn)
 		//	lv_obj_del(launch_bg); //! TODO: Find why it hangs.
 		launch_bg_done = true;
 	}
+
+	close_btn = NULL;
 
 	return LV_RES_INV;
 }
@@ -2225,6 +2235,30 @@ static void _nyx_main_menu(lv_theme_t * th)
 	}
 }
 
+static void _nyx_gui_loop_powersave_ram()
+{
+	// Saves 280 mW.
+	while (true)
+	{
+		minerva_change_freq(FREQ_1600);  // Takes 295 us.
+
+		lv_task_handler();
+
+		minerva_change_freq(FREQ_800);   // Takes 80 us.
+	}
+}
+
+static void _nyx_gui_loop_powersave_cpu()
+{
+	// Saves 75 mW.
+	while (true)
+	{
+		lv_task_handler();
+
+		bpmp_usleep(HALT_COP_MAX_CNT);   // Takes 200 us.
+	}
+}
+
 void nyx_load_and_run()
 {
 	memset(&system_tasks, 0, sizeof(system_maintenance_tasks_t));
@@ -2239,8 +2273,11 @@ void nyx_load_and_run()
 	lv_disp_drv_register(&disp_drv);
 
 	// Initialize Joy-Con.
-	lv_task_t *task_jc_init_hw = lv_task_create(jc_init_hw, LV_TASK_ONESHOT, LV_TASK_PRIO_LOWEST, NULL);
-	lv_task_once(task_jc_init_hw);
+	if (!n_cfg.jc_disable)
+	{
+		lv_task_t *task_jc_init_hw = lv_task_create(jc_init_hw, LV_TASK_ONESHOT, LV_TASK_PRIO_LOWEST, NULL);
+		lv_task_once(task_jc_init_hw);
+	}
 	lv_indev_drv_t indev_drv_jc;
 	lv_indev_drv_init(&indev_drv_jc);
 	indev_drv_jc.type = LV_INDEV_TYPE_POINTER;
@@ -2280,13 +2317,15 @@ void nyx_load_and_run()
 		lv_task_once(task_run_sd_errors);
 	}
 
-	while (true)
+	// Gui loop.
+	if (h_cfg.t210b01)
 	{
-		minerva_change_freq(FREQ_1600);  // Takes 295us.
-
-		lv_task_handler();
-
-		minerva_change_freq(FREQ_800);   // Takes 80us. Saves 280mW.
-		//bpmp_usleep(HALT_COP_MAX_CNT); // Taskes 200us. Saves 75mW.
+		// Minerva not supported on T210B01 yet. No power saving.
+		while (true)
+			lv_task_handler();
 	}
+	else if (n_cfg.new_powersave)
+		_nyx_gui_loop_powersave_ram(); // Alternate DRAM frequencies. Higher power savings.
+	else
+		_nyx_gui_loop_powersave_cpu(); // Suspend CPU. Lower power savings.
 }

@@ -44,7 +44,7 @@ u32 get_tmr_ms()
 
 u32 get_tmr_us()
 {
-	return TMR(TIMERUS_CNTR_1US); //TIMERUS_CNTR_1US
+	return TMR(TIMERUS_CNTR_1US);
 }
 
 void msleep(u32 ms)
@@ -147,6 +147,23 @@ void reboot_rcm()
 
 	PMC(APBDEV_PMC_SCRATCH0) = PMC_SCRATCH0_MODE_RCM;
 	PMC(APBDEV_PMC_CNTRL) |= PMC_CNTRL_MAIN_RST;
+
+	while (true)
+		bpmp_halt();
+}
+
+void reboot_full()
+{
+	sd_end();
+	hw_reinit_workaround(false, 0);
+
+	// Enable soft reset wake event.
+	u8 reg = i2c_recv_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_ONOFFCNFG2);
+	reg |= MAX77620_ONOFFCNFG2_SFT_RST_WK;
+	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_ONOFFCNFG2, reg);
+
+	// Do a soft reset.
+	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_ONOFFCNFG1, MAX77620_ONOFFCNFG1_SFT_RST);
 
 	while (true)
 		bpmp_halt();

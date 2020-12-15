@@ -55,6 +55,7 @@ You can find a template [Here](./res/hekate_ipl_template.ini)
 | bootwait=3         | 0: Disable (It also disables bootlogo. Having **VOL-** pressed since injection goes to menu.), #: Time to wait for **VOL-** to enter menu. |
 | autohosoff=1       | 0: Disable, 1: If woke up from HOS via an RTC alarm, shows logo, then powers off completely, 2: No logo, immediately powers off.|
 | autonogc=1         | 0: Disable, 1: Automatically applies nogc patch if unburnt fuses found and a >= 4.0.0 HOS is booted. |
+| bootprotect=0      | 0: Disable, 1: Protect bootloader folder from being corrupted by disallowing reading or editing in HOS. |
 | updater2p=0        | 0: Disable, 1: Force updates (if needed) the reboot2payload binary to be hekate. |
 | backlight=100      | Screen backlight level. 0-255.                             |
 
@@ -67,7 +68,9 @@ You can find a template [Here](./res/hekate_ipl_template.ini)
 | timeoff=100        | Sets time offset in HEX. Must be in HOS epoch format       |
 | homescreen=0       | Sets home screen. 0: Home menu, 1: All configs (merges Launch and More configs), 2: Launch, 3: More Configs. |
 | verification=1     | 0: Disable Backup/Restore verification, 1: Sparse (block based, fast and mostly reliable), 2: Full (sha256 based, slow and 100% reliable). |
-| umsemmcrw=1        | 1: eMMC/emuMMC UMS will be mounted as writable by default. |
+| umsemmcrw=0        | 1: eMMC/emuMMC UMS will be mounted as writable by default. |
+| jcdisable=0        | 1: Disables Joycon driver completely.                      |
+| newpowersave=1     | 0: Timer based, 1: DRAM frequency based (Better). Use 0 if Nyx hangs. |
 
 
 ### Boot entry key/value combinations:
@@ -81,6 +84,7 @@ You can find a template [Here](./res/hekate_ipl_template.ini)
 | kip1={SD folder}/*     | Loads every .kip/.kip1 inside a folder. Compatible with single kip1 keys. |
 | fss0={SD path}         | Takes a fusee-secondary binary and `extracts` all needed parts from it. kips, exosphere, warmboot and sept. |
 | fss0experimental=1     | Enables loading of experimental content from a FSS0 storage |
+| exofatal={SD path}     | Replaces the exosphere fatal binary for Mariko             |
 | kip1patch=patchname    | Enables a kip1 patch. Specify with multiple lines and/or as CSV. If not found, an error will show up |
 | fullsvcperm=1          | Disables SVC verification (full services permission)       |
 | debugmode=1            | Enables Debug mode. Obsolete when used with exosphere as secmon. |
@@ -120,12 +124,12 @@ hekate has a boot storage in the binary that helps it configure it outside of BP
 
 | Offset / Name           | Description                                                       |
 | ----------------------- | ----------------------------------------------------------------- |
-| '0x94' boot_cfg         | bit0: `Force AutoBoot`, bit1: `Show launch log`, bit2: `Boot from ID`, bit3: `Boot to emuMMC`, bit6: `Boot to UMS`, bit7: `sept run`. |
+| '0x94' boot_cfg         | bit0: `Force AutoBoot`, bit1: `Show launch log`, bit2: `Boot from ID`, bit3: `Boot to emuMMC`, bit7: `sept run`. |
 | '0x95' autoboot         | If `Force AutoBoot`: 0: Force go to menu, else boot that entry.   |
 | '0x96' autoboot_list    | If `Force AutoBoot` and `autoboot` then it boots from ini folder. |
-| '0x97' extra_cfg        | bit7: Force Nyx to run `Dump pkg1/2`.                             |
+| '0x97' extra_cfg        | When menu is forced: bit5: `Run UMS`, bit7: `Run Dump pkg1/2`.    |
 | '0x98' xt_str[128]      | Depends on the set cfg bits.                                      |
-| '0x98' ums[1]           | When `Boot to UMS` is set, it will launch the selected UMS. 0: SD, 1: eMMC BOOT0, 2: eMMC BOOT1, 3: eMMC GPP, 4: emuMMC BOOT0, 5: emuMMC BOOT1, 6: emuMMC GPP,  |
+| '0x98' ums[1]           | When `Run UMS` is set, it will launch the selected UMS. 0: SD, 1: eMMC BOOT0, 2: eMMC BOOT1, 3: eMMC GPP, 4: emuMMC BOOT0, 5: emuMMC BOOT1, 6: emuMMC GPP,  |
 | '0x98' id[8]            | When `Boot from ID` is set, it will search all inis automatically and find the boot entry with that id and boot it. Must be NULL terminated. |
 | '0xA0' emummc_path[120] | When `Boot to emuMMC` is set, it will override the current emuMMC (boot entry or emummc.ini). Must be NULL terminated. |
 

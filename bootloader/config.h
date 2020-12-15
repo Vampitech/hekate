@@ -30,9 +30,9 @@ typedef struct _hekate_config
 	u32 autohosoff;
 	u32 autonogc;
 	u32 updater2p;
-	char *brand;
-	char *tagline;
+	u32 bootprotect;
 	// Global temporary config.
+	bool t210b01;
 	bool se_keygen_done;
 	bool sept_run;
 	bool aes_slots_new;

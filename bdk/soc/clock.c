@@ -16,20 +16,10 @@
  */
 
 #include <soc/clock.h>
+#include <soc/hw_init.h>
 #include <soc/t210.h>
 #include <storage/sdmmc.h>
 #include <utils/util.h>
-
-/*
- * CLOCK Peripherals:
- * L   0 -  31
- * H  32 -  63
- * U  64 -  95
- * V  96 - 127
- * W 128 - 159
- * X 160 - 191
- * Y 192 - 223
- */
 
 /* clock_t: reset, enable, source, index, clk_src, clk_div */
 
@@ -86,7 +76,7 @@ static clock_t _clock_coresight = {
 };
 
 static clock_t _clock_pwm = {
-	CLK_RST_CONTROLLER_RST_DEVICES_L, CLK_RST_CONTROLLER_CLK_OUT_ENB_L, CLK_RST_CONTROLLER_CLK_SOURCE_PWM,    CLK_L_PWM,      6, 4 // Fref: 6.2MHz.
+	CLK_RST_CONTROLLER_RST_DEVICES_L, CLK_RST_CONTROLLER_CLK_OUT_ENB_L, CLK_RST_CONTROLLER_CLK_SOURCE_PWM,    CLK_L_PWM,      6, 4 // Fref: 6.4MHz. Stock PLLP / 54: 7.55MHz.
 };
 
 static clock_t _clock_sdmmc_legacy_tm = {
@@ -96,30 +86,31 @@ static clock_t _clock_sdmmc_legacy_tm = {
 void clock_enable(const clock_t *clk)
 {
 	// Put clock into reset.
-	CLOCK(clk->reset) = (CLOCK(clk->reset) & ~(1 << clk->index)) | (1 << clk->index);
+	CLOCK(clk->reset) = (CLOCK(clk->reset) & ~BIT(clk->index)) | BIT(clk->index);
 	// Disable.
-	CLOCK(clk->enable) &= ~(1 << clk->index);
+	CLOCK(clk->enable) &= ~BIT(clk->index);
 	// Configure clock source if required.
 	if (clk->source)
 		CLOCK(clk->source) = clk->clk_div | (clk->clk_src << 29);
 	// Enable.
-	CLOCK(clk->enable) = (CLOCK(clk->enable) & ~(1 << clk->index)) | (1 << clk->index);
+	CLOCK(clk->enable) = (CLOCK(clk->enable) & ~BIT(clk->index)) | BIT(clk->index);
 	usleep(2);
 
 	// Take clock off reset.
-	CLOCK(clk->reset) &= ~(1 << clk->index);
+	CLOCK(clk->reset) &= ~BIT(clk->index);
 }
 
 void clock_disable(const clock_t *clk)
 {
 	// Put clock into reset.
-	CLOCK(clk->reset) = (CLOCK(clk->reset) & ~(1 << clk->index)) | (1 << clk->index);
+	CLOCK(clk->reset) = (CLOCK(clk->reset) & ~BIT(clk->index)) | BIT(clk->index);
 	// Disable.
-	CLOCK(clk->enable) &= ~(1 << clk->index);
+	CLOCK(clk->enable) &= ~BIT(clk->index);
 }
 
 void clock_enable_fuse(bool enable)
 {
+	// Enable Fuse registers visibility.
 	CLOCK(CLK_RST_CONTROLLER_MISC_CLK_ENB) = (CLOCK(CLK_RST_CONTROLLER_MISC_CLK_ENB) & 0xEFFFFFFF) | ((enable & 1) << 28);
 }
 
@@ -133,7 +124,7 @@ void clock_disable_uart(u32 idx)
 	clock_disable(&_clock_uart[idx]);
 }
 
-#define UART_SRC_CLK_DIV_EN (1 << 24)
+#define UART_SRC_CLK_DIV_EN BIT(24)
 
 int clock_uart_use_src_div(u32 idx, u32 baud)
 {
@@ -164,6 +155,10 @@ void clock_disable_i2c(u32 idx)
 void clock_enable_se()
 {
 	clock_enable(&_clock_se);
+
+	// Lock clock to always enabled if T210B01.
+	if (hw_get_chip_id() == GP_HIDREV_MAJOR_T210B01)
+		CLOCK(CLK_RST_CONTROLLER_CLK_SOURCE_SE) |= 0x100;
 }
 
 void clock_enable_tzram()
@@ -281,7 +276,7 @@ void clock_enable_pllc(u32 divn)
 	CLOCK(CLK_RST_CONTROLLER_PLLC_MISC_2) |= 0xF0 << 8; // PLLC_FLL_LD_MEM.
 
 	// Disable PLL and IDDQ in case they are on.
-	CLOCK(CLK_RST_CONTROLLER_PLLC_BASE) &= ~PLLCX_BASE_ENABLE;
+	CLOCK(CLK_RST_CONTROLLER_PLLC_BASE)   &= ~PLLCX_BASE_ENABLE;
 	CLOCK(CLK_RST_CONTROLLER_PLLC_MISC_1) &= ~PLLC_MISC1_IDDQ;
 	usleep(10);
 
@@ -294,7 +289,7 @@ void clock_enable_pllc(u32 divn)
 		;
 
 	// Disable PLLC_OUT1, enable reset and set div to 1.5.
-	CLOCK(CLK_RST_CONTROLLER_PLLC_OUT) = (1 << 8);
+	CLOCK(CLK_RST_CONTROLLER_PLLC_OUT) = BIT(8);
 
 	// Enable PLLC_OUT1 and bring it out of reset.
 	CLOCK(CLK_RST_CONTROLLER_PLLC_OUT) |= (PLLC_OUT1_CLKEN | PLLC_OUT1_RSTN_CLR);
@@ -304,15 +299,15 @@ void clock_enable_pllc(u32 divn)
 void clock_disable_pllc()
 {
 	// Disable PLLC and PLLC_OUT1.
-	CLOCK(CLK_RST_CONTROLLER_PLLC_OUT) &= ~(PLLC_OUT1_CLKEN | PLLC_OUT1_RSTN_CLR);
-	CLOCK(CLK_RST_CONTROLLER_PLLC_BASE) &= ~PLLCX_BASE_ENABLE;
-	CLOCK(CLK_RST_CONTROLLER_PLLC_BASE) |= PLLCX_BASE_REF_DIS;
+	CLOCK(CLK_RST_CONTROLLER_PLLC_OUT)    &= ~(PLLC_OUT1_CLKEN | PLLC_OUT1_RSTN_CLR);
+	CLOCK(CLK_RST_CONTROLLER_PLLC_BASE)   &= ~PLLCX_BASE_ENABLE;
+	CLOCK(CLK_RST_CONTROLLER_PLLC_BASE)   |= PLLCX_BASE_REF_DIS;
 	CLOCK(CLK_RST_CONTROLLER_PLLC_MISC_1) |= PLLC_MISC1_IDDQ;
-	CLOCK(CLK_RST_CONTROLLER_PLLC_MISC) |= PLLC_MISC_RESET;
+	CLOCK(CLK_RST_CONTROLLER_PLLC_MISC)   |= PLLC_MISC_RESET;
 	usleep(10);
 }
 
-#define PLLC4_ENABLED (1 << 31)
+#define PLLC4_ENABLED BIT(31)
 #define PLLC4_IN_USE  (~PLLC4_ENABLED)
 
 u32 pllc4_enabled = 0;
@@ -360,6 +355,48 @@ static void _clock_disable_pllc4(u32 mask)
 	usleep(10);
 
 	pllc4_enabled = 0;
+}
+
+void clock_enable_pllu()
+{
+	// Configure PLLU.
+	CLOCK(CLK_RST_CONTROLLER_PLLU_MISC) |= BIT(29); // Disable reference clock.
+	u32 pllu_cfg = (CLOCK(CLK_RST_CONTROLLER_PLLU_BASE) & 0xFFE00000) | BIT(24) | (1 << 16) | (0x19 << 8) | 2;
+	CLOCK(CLK_RST_CONTROLLER_PLLU_BASE) = pllu_cfg;
+	CLOCK(CLK_RST_CONTROLLER_PLLU_BASE) = pllu_cfg | PLLCX_BASE_ENABLE; // Enable.
+
+	// Wait for PLL to stabilize.
+	u32 timeout = (u32)TMR(TIMERUS_CNTR_1US) + 1300;
+	while (!(CLOCK(CLK_RST_CONTROLLER_PLLU_BASE) & PLLCX_BASE_LOCK)) // PLL_LOCK.
+		if ((u32)TMR(TIMERUS_CNTR_1US) > timeout)
+			break;
+	usleep(10);
+
+	// Enable PLLU USB/HSIC/ICUSB/48M.
+	CLOCK(CLK_RST_CONTROLLER_PLLU_BASE) |= 0x2E00000;
+}
+
+void clock_disable_pllu()
+{
+	CLOCK(CLK_RST_CONTROLLER_PLLU_BASE) &= ~0x2E00000;  // Disable PLLU USB/HSIC/ICUSB/48M.
+	CLOCK(CLK_RST_CONTROLLER_PLLU_BASE) &= ~0x40000000; // Disable PLLU.
+	CLOCK(CLK_RST_CONTROLLER_PLLU_MISC) &= ~0x20000000; // Enable reference clock.
+}
+
+void clock_enable_utmipll()
+{
+	// Set UTMIPLL dividers and config based on OSC and enable it to 960 MHz.
+	CLOCK(CLK_RST_CONTROLLER_UTMIP_PLL_CFG0) = (CLOCK(CLK_RST_CONTROLLER_UTMIP_PLL_CFG0) & 0xFF0000FF) | (25 << 16) | (1 << 8); // 38.4Mhz * (25 / 1) = 960 MHz.
+	CLOCK(CLK_RST_CONTROLLER_UTMIP_PLL_CFG2) = (CLOCK(CLK_RST_CONTROLLER_UTMIP_PLL_CFG2) & 0xFF00003F) | (24 << 18); // Set delay count for 38.4Mhz osc crystal.
+	CLOCK(CLK_RST_CONTROLLER_UTMIP_PLL_CFG1) = (CLOCK(CLK_RST_CONTROLLER_UTMIP_PLL_CFG1) &  0x7FFA000) | (1 << 15) | 375;
+
+	// Wait for UTMIPLL to stabilize.
+	u32 retries = 10; // Wait 20us
+	while (!(CLOCK(CLK_RST_CONTROLLER_UTMIPLL_HW_PWRDN_CFG0) & UTMIPLL_LOCK) && retries)
+	{
+		usleep(1);
+		retries--;
+	}
 }
 
 static int _clock_sdmmc_is_reset(u32 id)
@@ -473,7 +510,7 @@ static void _clock_sdmmc_clear_enable(u32 id)
 static void _clock_sdmmc_config_legacy_tm()
 {
 	clock_t *clk = &_clock_sdmmc_legacy_tm;
-	if (!(CLOCK(clk->enable) & (1 << clk->index)))
+	if (!(CLOCK(clk->enable) & BIT(clk->index)))
 		clock_enable(clk);
 }
 
@@ -558,7 +595,7 @@ static int _clock_sdmmc_config_clock_host(u32 *pclock, u32 id, u32 val)
 
 	// Enable PLLC4 if in use by any SDMMC.
 	if (source)
-		_clock_enable_pllc4(1 << id);
+		_clock_enable_pllc4(BIT(id));
 
 	// Set SDMMC legacy timeout clock.
 	_clock_sdmmc_config_legacy_tm();
@@ -682,5 +719,5 @@ void clock_sdmmc_disable(u32 id)
 	_clock_sdmmc_set_reset(id);
 	_clock_sdmmc_clear_enable(id);
 	_clock_sdmmc_is_reset(id);
-	_clock_disable_pllc4(1 << id);
+	_clock_disable_pllc4(BIT(id));
 }

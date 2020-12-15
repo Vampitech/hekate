@@ -80,8 +80,12 @@ typedef struct _exo_cfg_t
 {
 	u32 magic;
 	u32 fwno;
-	u32 flags;
-	u32 reserved[5];
+	u32 flags[2];
+	u16 display_id;
+	u8  uart_port;
+	u8  uart_invert;
+	u32 uart_baudrate;
+	u32 rsvd1[2];
 	exo_emummc_config_t emummc_cfg;
 } exo_cfg_t;
 
@@ -124,20 +128,23 @@ typedef struct _atm_fatal_error_ctx
 } atm_fatal_error_ctx;
 
 #define ATM_FATAL_ERR_CTX_ADDR 0x4003E000
-#define  ATM_FATAL_MAGIC 0x30454641 // AFE0
+#define  ATM_FATAL_MAGIC       0x30454641 // AFE0
 
-#define ATM_WB_HEADER_OFF 0x244
-#define  ATM_WB_MAGIC 0x30544257
+#define ATM_EXO_FATAL_ADDR     0x80020000
+#define  ATM_EXO_FATAL_SIZE    0x20000
+
+#define ATM_WB_HEADER_OFF      0x244
+#define  ATM_WB_MAGIC          0x30544257 // WBT0
 
 // Exosphère mailbox defines.
-#define EXO_CFG_ADDR      0x8000F000
+#define EXO_CFG_ADDR             0x8000F000
 #define  EXO_MAGIC_VAL           0x304F5845
-#define  EXO_FLAG_DBG_PRIV        (1 << 1)
-#define  EXO_FLAG_DBG_USER        (1 << 2)
-#define  EXO_FLAG_NO_USER_EXC     (1 << 3)
-#define  EXO_FLAG_USER_PMU        (1 << 4)
-#define  EXO_FLAG_CAL0_BLANKING   (1 << 5)
-#define  EXO_FLAG_CAL0_WRITES_SYS (1 << 6)
+#define  EXO_FLAG_DBG_PRIV        BIT(1)
+#define  EXO_FLAG_DBG_USER        BIT(2)
+#define  EXO_FLAG_NO_USER_EXC     BIT(3)
+#define  EXO_FLAG_USER_PMU        BIT(4)
+#define  EXO_FLAG_CAL0_BLANKING   BIT(5)
+#define  EXO_FLAG_CAL0_WRITES_SYS BIT(6)
 
 #define EXO_FW_VER(mj, mn, rv) (((mj) << 24) | ((mn) << 16) | ((rv) << 8))
 
@@ -158,7 +165,7 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base, bool exo_new)
 	switch (kb)
 	{
 	case KB_FIRMWARE_VERSION_100_200:
-		if (!strcmp(ctxt->pkg1_id->id, "20161121183008"))
+		if (!memcmp(ctxt->pkg1_id->id, "20161121183008", 8))
 			exoFwNo = 1;
 		else
 			exoFwNo = 2;
@@ -168,10 +175,12 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base, bool exo_new)
 		break;
 	default:
 		exoFwNo = kb + 1;
-		if (!strcmp(ctxt->pkg1_id->id, "20190314172056") || (kb >= KB_FIRMWARE_VERSION_810))
-			exoFwNo++; // ATM_TARGET_FW_800/810/900/910.
-		if (!strcmp(ctxt->pkg1_id->id, "20200303104606"))
-			exoFwNo++; // ATM_TARGET_FW_1000.
+		if (!memcmp(ctxt->pkg1_id->id, "20190314172056", 8) || (kb >= KB_FIRMWARE_VERSION_810))
+			exoFwNo++;    // ATM_TARGET_FW_800 and up.
+		if (!memcmp(ctxt->pkg1_id->id, "20200303104606", 8))
+			exoFwNo++;    // ATM_TARGET_FW_1000.
+		else if (!memcmp(ctxt->pkg1_id->id, "20201030110855", 8)) //TODO: Add better checks in case mkey doesn't change.
+			exoFwNo += 2; // ATM_TARGET_FW_1100.
 		break;
 	}
 
@@ -215,6 +224,9 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base, bool exo_new)
 		case 13:
 			exoFwNo = EXO_FW_VER(10, 0, 0);
 			break;
+		case 14:
+			exoFwNo = EXO_FW_VER(11, 0, 0);
+			break;
 		}
 	}
 
@@ -234,6 +246,12 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base, bool exo_new)
 				{
 					if (!strcmp("debugmode_user", kv->key))
 						user_debug = atoi(kv->val);
+					else if (!strcmp("log_port", kv->key))
+						exo_cfg->uart_port = atoi(kv->val);
+					else if (!strcmp("log_inverted", kv->key))
+						exo_cfg->uart_invert = atoi(kv->val);
+					else if (!strcmp("log_baud_rate", kv->key))
+						exo_cfg->uart_baudrate = atoi(kv->val);
 					else if (emu_cfg.enabled && !h_cfg.emummc_force_disable)
 					{
 						if (!strcmp("blank_prodinfo_emummc", kv->key))
@@ -281,7 +299,7 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base, bool exo_new)
 	// Set mailbox values.
 	exo_cfg->magic = EXO_MAGIC_VAL;
 	exo_cfg->fwno = exoFwNo;
-	exo_cfg->flags = exoFlags;
+	exo_cfg->flags[0] = exoFlags;
 
 	// If warmboot is lp0fw, add in RSA modulus.
 	volatile wb_cfg_t *wb_cfg = (wb_cfg_t *)(warmboot_base + ATM_WB_HEADER_OFF);
@@ -294,13 +312,25 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base, bool exo_new)
 		u8 *rsa_mod = (u8 *)malloc(512);
 
 		sdmmc_storage_set_mmc_partition(&emmc_storage, EMMC_BOOT0);
-		sdmmc_storage_read(&emmc_storage, 1, 1, rsa_mod);
 
-		// Patch AutoRCM out.
-		if ((fuse_read_odm(4) & 3) != 3)
-			rsa_mod[0x10] = 0xF7;
-		else
-			rsa_mod[0x10] = 0x37;
+		u32 sector;
+		for (u32 i = 0; i < 4; i++)
+		{
+			sector = 1 + (32 * i); // 0x4000 bct + 0x200 offset.
+			sdmmc_storage_read(&emmc_storage, sector, 1, rsa_mod);
+
+			// Check if 2nd byte of modulus is correct.
+			if (rsa_mod[0x11] != 0x86)
+				continue;
+
+			// Patch AutoRCM out.
+			if ((fuse_read_odm(4) & 3) != 3)
+				rsa_mod[0x10] = 0xF7;
+			else
+				rsa_mod[0x10] = 0x37;
+
+			break;
+		}
 
 		memcpy((void *)(warmboot_base + 0x10), rsa_mod + 0x10, 0x100);
 	}
@@ -324,6 +354,27 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base, bool exo_new)
 		else
 			exo_cfg->emummc_cfg.nintendo_path[0] = 0;
 	}
+
+	// Copy over exosphere fatal for Mariko.
+	if (h_cfg.t210b01)
+	{
+		memset((void *)ATM_EXO_FATAL_ADDR, 0, ATM_EXO_FATAL_SIZE);
+		if (ctxt->exofatal)
+			memcpy((void *)ATM_EXO_FATAL_ADDR, ctxt->exofatal, ctxt->exofatal_size);
+
+		// Set display id.
+		exo_cfg->display_id = display_get_decoded_panel_id();
+	}
+
+#ifdef DEBUG_UART_PORT
+	// Ovverride logging parameters if set in compile time.
+	if (!ctxt->stock)
+	{
+		exo_cfg->uart_port = DEBUG_UART_PORT;
+		exo_cfg->uart_invert = DEBUG_UART_INVERT;
+		exo_cfg->uart_baudrate = DEBUG_UART_BAUDRATE;
+	}
+#endif
 }
 
 static const char *get_error_desc(u32 error_desc)
@@ -344,6 +395,8 @@ static const char *get_error_desc(u32 error_desc)
 		return "SYS";   // System Error.
 	case 0x301:
 		return "SVC";   // Bad arguments or unimplemented SVC.
+	case 0xF00:
+		return "KRNL";  // Kernel panic.
 	case 0xFFD:
 		return "SO";    // Stack Overflow.
 	case 0xFFE:
@@ -360,9 +413,6 @@ void secmon_exo_check_panic()
 	// Mask magic to maintain compatibility with any AFE version, thanks to additive struct members.
 	if ((rpt->magic & 0xF0FFFFFF) != ATM_FATAL_MAGIC)
 		return;
-
-	// Change magic to invalid, to prevent double-display of error/bootlooping.
-	rpt->magic = 0;
 
 	gfx_clear_grey(0x1B);
 	gfx_con_setpos(0, 0);
@@ -385,6 +435,9 @@ void secmon_exo_check_panic()
 		WPRINTFARGS("Report saved to %s\n", filepath);
 		gfx_con.fntsz = 16;
 	}
+
+	// Change magic to invalid, to prevent double-display of error/bootlooping.
+	rpt->magic = 0;
 
 	gfx_printf("\n\nPress POWER to continue.\n");
 
