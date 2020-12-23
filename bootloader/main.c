@@ -1550,13 +1550,7 @@ void ipl_main()
 	h_cfg.errors |= !sd_mount() ? ERR_SD_BOOT_EN : 0;
 
 	// Save sdram lp0 config.
-<<<<<<< HEAD
 	if (!ianos_loader("NEXT/sys/libsys_lp0.bso", DRAM_LIB, (void *)sdram_get_params_patched()))
-=======
-	void *sdram_params =
-		hw_get_chip_id() == GP_HIDREV_MAJOR_T210 ? sdram_get_params_patched() : sdram_get_params_t210b01();
-	if (!ianos_loader("bootloader/sys/libsys_lp0.bso", DRAM_LIB, sdram_params))
->>>>>>> 9d79f398972f856f1c10ebe4d943a89be9c1810a
 		h_cfg.errors |= ERR_LIBSYS_LP0;
 
 	// Train DRAM and switch to max frequency.
