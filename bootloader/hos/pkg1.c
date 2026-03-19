@@ -365,25 +365,25 @@ int pkg1_warmboot_config(void *hos_ctxt, u32 warmboot_base, u32 fuses_fw, u8 mke
 				sd_save_to_file((void *)warmboot_base, ctxt->warmboot_size, path);
 			}
 
-			// Load warmboot from storage if low.
+// Load warmboot from storage if low.
 			if (burnt_fuses > fuses_fw)
 			{
 				char wb_path[32];
 				strcpy(wb_path, "warmboot_mariko/wb_00.bin");
 				itoa(burnt_fuses, &wb_path[19 + (burnt_fuses < 0x10 ? 1 : 0)], 16);
 				wb_path[21] = '.';
-				// Let's try to load extracted warmboot
+				// 1. Intenta cargar tu extracción de Atmosphere primero
 				void *warmboot_fw = sd_file_read(wb_path, &ctxt->warmboot_size);
 				
 				if (warmboot_fw)
 				{
-					// Raw mode
+					// Formato crudo de Atmosphere: No cortamos cabeceras y usamos burnt_fuses
 					ctxt->warmboot = warmboot_fw;
 					fuses_fw = burnt_fuses;
 				}
 				else
 				{
-					// Fallback to  sc7exit 
+					// 2. Fallback a sc7exit de Hekate (formato con wrapper)
 					warmboot_fw = sd_file_read("bootloader/sys/l4t/sc7exit_b01.bin", &ctxt->warmboot_size);
 					
 					if (warmboot_fw)
@@ -398,6 +398,12 @@ int pkg1_warmboot_config(void *hos_ctxt, u32 warmboot_base, u32 fuses_fw, u8 mke
 						}
 					}
 				}
+				// Verificación final estricta
+				if (!warmboot_fw || burnt_fuses > fuses_fw)
+					res = 0;
+				else
+					burnt_fuses = fuses_fw;
+			}
 			else // Replace burnt fuses with higher count.
 				burnt_fuses = fuses_fw;
 		}
