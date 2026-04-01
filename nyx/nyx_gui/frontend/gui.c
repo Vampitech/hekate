@@ -27,7 +27,6 @@
 #include <libs/lvgl/lv_themes/lv_theme_hekate.h>
 #include <libs/lvgl/lvgl.h>
 
-
 #include "../config.h"
 #include <libs/fatfs/ff.h>
 
@@ -2371,7 +2370,7 @@ static void _nyx_main_menu(lv_theme_t *th) {
 
   // Cambia el ultimo numero (-40) para ajustar la altura del texto a tu gusto.
   // Mientras mas negativo sea, mas arriba estara de la pantalla.
-  lv_obj_align(footer, NULL, LV_ALIGN_IN_BOTTOM_MID, 0, -40);
+  lv_obj_align(footer, NULL, LV_ALIGN_IN_BOTTOM_MID, 0, -15);
 
   // Create tasks.
   system_tasks.task.dram_periodic_comp =
