@@ -171,7 +171,8 @@ static const pkg1_id_t _pkg1_ids[] = {
 	{ "20240207", 17, 19, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 18.0.0 - 18.1.0.
 	{ "20240808", 18, 20, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 19.0.0 - 19.0.1.
 	{ "20250206", 19, 21, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 20.0.0 - 20.5.0.
-	{ "20251009", 20, 22, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 21.0.0+
+	{ "20251009", 20, 22, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 21.0.0 - 21.2.0.
+	{ "20260123", 21, 23, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 22.0.0+
 };
 
 const pkg1_id_t *pkg1_get_latest()
@@ -195,7 +196,7 @@ const pkg1_id_t *pkg1_identify(u8 *pkg1)
 	return NULL;
 }
 
-int pkg1_decrypt(const pkg1_id_t *id, u8 *pkg1)
+bool pkg1_decrypt(const pkg1_id_t *id, u8 *pkg1)
 {
 	pk11_hdr_t *hdr;
 
@@ -344,7 +345,7 @@ void pkg1_warmboot_patch(void *hos_ctxt)
 int pkg1_warmboot_config(void *hos_ctxt, u32 warmboot_base, u32 fuses_fw, u8 mkey)
 {
 	launch_ctxt_t *ctxt = (launch_ctxt_t *)hos_ctxt;
-	int res = 1;
+	int res = 0;
 
 	if (h_cfg.t210b01)
 	{
@@ -365,44 +366,22 @@ int pkg1_warmboot_config(void *hos_ctxt, u32 warmboot_base, u32 fuses_fw, u8 mke
 				sd_save_to_file((void *)warmboot_base, ctxt->warmboot_size, path);
 			}
 
-// Load warmboot from storage if low.
+			// Load sc7exit-fw from storage if low.
 			if (burnt_fuses > fuses_fw)
 			{
-				char wb_path[32];
-				strcpy(wb_path, "warmboot_mariko/wb_00.bin");
-				itoa(burnt_fuses, &wb_path[19 + (burnt_fuses < 0x10 ? 1 : 0)], 16);
-				wb_path[21] = '.';
-				// 1. Intenta cargar tu extracción de Atmosphere primero
-				void *warmboot_fw = sd_file_read(wb_path, &ctxt->warmboot_size);
-				
-				if (warmboot_fw)
-				{
-					// Formato crudo de Atmosphere: No cortamos cabeceras y usamos burnt_fuses
-					ctxt->warmboot = warmboot_fw;
-					fuses_fw = burnt_fuses;
-				}
-				else
-				{
-					// 2. Fallback a sc7exit de Hekate (formato con wrapper)
-					warmboot_fw = sd_file_read("bootloader/sys/l4t/sc7exit_b01.bin", &ctxt->warmboot_size);
-					
-					if (warmboot_fw)
-					{
-						fuses_fw = *(u32 *)warmboot_fw; // El wrapper de Hekate dice sus propios fuses
-						
-						if (burnt_fuses <= fuses_fw)
-						{
-							// Recortamos la cabecera especial de Hekate
-							ctxt->warmboot = warmboot_fw + sizeof(u32);
-							ctxt->warmboot_size -= sizeof(u32) * 2;
-						}
-					}
-				}
-				// Verificación final estricta
+				//!TODO: Update on fuse burns.
+				void *warmboot_fw = sd_file_read("bootloader/sys/l4t/sc7exit_b01.bin", &ctxt->warmboot_size);
+				fuses_fw = *(u32 *)warmboot_fw;
+
+				// Check if high enough.
 				if (!warmboot_fw || burnt_fuses > fuses_fw)
-					res = 0;
+					res = 1;
 				else
+				{
+					ctxt->warmboot = warmboot_fw + sizeof(u32);
+					ctxt->warmboot_size -= sizeof(u32) * 2;
 					burnt_fuses = fuses_fw;
+				}
 			}
 			else // Replace burnt fuses with higher count.
 				burnt_fuses = fuses_fw;
